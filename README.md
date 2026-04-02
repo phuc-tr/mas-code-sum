@@ -126,9 +126,10 @@ mlflow ui --backend-store-uri mlruns/
 Each experiment is defined by a YAML file in `experiments/`:
 
 ```yaml
-experiment_name: exact_copy_baseline   # MLflow experiment name (must be unique per experiment)
+method: zero_shot_llm                  # key in REGISTRY (see src/mas_code_sum/methods/__init__.py)
 
-method: exact_copy                     # key in REGISTRY (see src/mas_code_sum/methods/__init__.py)
+method_params:                         # passed as kwargs to the method constructor (optional)
+  model: meta-llama/llama-3.1-8b-instruct
 
 languages:                             # which languages to load samples from
   - python
@@ -142,11 +143,13 @@ split: test                            # which split to evaluate on (train or te
 max_samples: 100                       # max samples per project; set to null for all
 ```
 
-To run a different experiment, create a new YAML with a new `experiment_name` and point it at a different method.
+To run a different method or model, create a new YAML pointing at it. All runs always land in the same MLflow experiment.
 
 ### MLflow Tracking
 
-Each experiment config maps to one **MLflow experiment**. Within that experiment, each **run** represents one project (identified by `repository_name`).
+All runs are collected under a single MLflow experiment: **`code-summarization`**.
+
+Each **run** represents one `(method, project)` pair and is named `{method}/{project}` (e.g. `zero_shot_llm/ekzhu/datasketch`). This means you can filter runs by the `method` param in the UI and compare the same project across different methods side by side.
 
 Every run logs:
 
@@ -157,7 +160,7 @@ Every run logs:
 - `split` — dataset split used
 - `num_samples` — number of samples evaluated
 - `max_samples_per_project` — cap from the config
-- any hyperparameters returned by the method's `params()` method
+- any hyperparameters returned by the method's `params()` method (e.g. `model`)
 
 **Metrics**
 - `bleu` — corpus BLEU with smoothing

@@ -1,0 +1,15 @@
+method: zero_shot_llm
+
+method_params:
+  model: meta-llama/llama-3.1-8b-instruct
+
+languages:
+  - python
+  - java
+  # - javascript
+  # - go
+  # - php
+  # - ruby
+
+split: test
+max_samples: 2

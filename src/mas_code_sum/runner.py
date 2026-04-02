@@ -6,8 +6,12 @@ import tempfile
 from pathlib import Path
 
 import mlflow
+from dotenv import load_dotenv
 
+load_dotenv()
 mlflow.set_tracking_uri("mlruns/")
+
+EXPERIMENT_NAME = "code-summarization"
 
 from .data import load_projects
 from .metrics import compute_metrics
@@ -16,7 +20,6 @@ from .methods.base import BaseSummarizer
 
 def run_experiment(
     method: BaseSummarizer,
-    experiment_name: str,
     languages: list[str],
     split: str = "test",
     max_samples: int | None = None,
@@ -24,18 +27,17 @@ def run_experiment(
     """
     Run a summarization experiment across all projects found in the given languages.
 
-    One MLflow experiment per call (named by experiment_name).
-    One MLflow run per project (repository_name), with language logged as a param.
-    max_samples caps the number of samples per project.
+    All runs land in the single "code-summarization" MLflow experiment.
+    Each run represents one (method, project) pair, named "{method}/{project}",
+    making cross-method comparison easy within the MLflow UI.
     """
-    mlflow.set_experiment(experiment_name)
+    mlflow.set_experiment(EXPERIMENT_NAME)
 
     print(f"Loading projects for languages: {languages}...")
     projects = load_projects(languages, split=split, max_samples_per_project=max_samples)
     print(f"Found {len(projects)} projects.")
 
     for project, samples in projects.items():
-        # A project's samples may technically span languages, so log all unique ones.
         project_languages = list({s["language"] for s in samples})
 
         references = [s["func_documentation_string"] for s in samples]
@@ -44,7 +46,7 @@ def run_experiment(
         metrics = compute_metrics(predictions, references)
         print(f"  [{project}] {metrics}")
 
-        with mlflow.start_run(run_name=project):
+        with mlflow.start_run(run_name=f"{method.name}/{project}"):
             mlflow.log_params({
                 "method": method.name,
                 "project": project,

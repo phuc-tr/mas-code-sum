@@ -1,17 +1,16 @@
 # Experiment configuration
 # Run with: python run_experiment.py experiments/example.yaml
-
-experiment_name: exact_copy_baseline
+# All runs are tracked under the single "code-summarization" MLflow experiment.
 
 method: exact_copy            # key in REGISTRY in src/mas_code_sum/methods/__init__.py
 
 languages:
   - python
   - java
-  - javascript
-  - go
-  - php
-  - ruby
+  # - javascript
+  # - go
+  # - php
+  # - ruby
 
 split: test
 max_samples: 100              # max samples per project; set to null for all

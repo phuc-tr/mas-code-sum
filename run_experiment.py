@@ -19,11 +19,10 @@ def main(config_path: str) -> None:
     if method_key not in REGISTRY:
         raise ValueError(f"Unknown method '{method_key}'. Available: {list(REGISTRY)}")
 
-    method = REGISTRY[method_key]()
+    method = REGISTRY[method_key](**cfg.get("method_params", {}))
 
     run_experiment(
         method=method,
-        experiment_name=cfg["experiment_name"],
         languages=cfg["languages"],
         split=cfg.get("split", "test"),
         max_samples=cfg.get("max_samples"),
