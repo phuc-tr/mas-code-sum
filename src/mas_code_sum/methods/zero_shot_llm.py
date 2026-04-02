@@ -27,7 +27,7 @@ class ZeroShotLLMSummarizer(BaseSummarizer):
             base_url=OPENROUTER_BASE_URL,
         )
 
-    def summarize(self, code: str, language: str) -> str:
+    def summarize(self, code: str, language: str, project: str | None = None) -> str:
         response = self._client.chat.completions.create(
             model=self.model,
             messages=[

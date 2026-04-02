@@ -1,15 +1,15 @@
-method: zero_shot_llm
+method: few_shot_llm
 
 method_params:
   model: meta-llama/llama-3.1-8b-instruct
 
+retriever: random_same_project
+retriever_params:
+  n: 3
+
 languages:
   - python
   - java
-  # - javascript
-  # - go
-  # - php
-  # - ruby
 
 split: test
 max_samples: 10

@@ -9,6 +9,7 @@ import yaml
 
 from src.mas_code_sum.runner import run_experiment
 from src.mas_code_sum.methods import REGISTRY
+from src.mas_code_sum.retrievers import RETRIEVER_REGISTRY
 
 
 def main(config_path: str) -> None:
@@ -19,7 +20,17 @@ def main(config_path: str) -> None:
     if method_key not in REGISTRY:
         raise ValueError(f"Unknown method '{method_key}'. Available: {list(REGISTRY)}")
 
-    method = REGISTRY[method_key](**cfg.get("method_params", {}))
+    retriever = None
+    if retriever_key := cfg.get("retriever"):
+        if retriever_key not in RETRIEVER_REGISTRY:
+            raise ValueError(f"Unknown retriever '{retriever_key}'. Available: {list(RETRIEVER_REGISTRY)}")
+        retriever = RETRIEVER_REGISTRY[retriever_key](**cfg.get("retriever_params", {}))
+
+    method_params = cfg.get("method_params", {})
+    if retriever is not None:
+        method_params = {**method_params, "retriever": retriever}
+
+    method = REGISTRY[method_key](**method_params)
 
     run_experiment(
         method=method,

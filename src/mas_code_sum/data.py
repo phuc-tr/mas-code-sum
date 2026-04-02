@@ -10,13 +10,17 @@ LANGUAGES = ["python", "java", "javascript", "go", "php", "ruby"]
 
 
 def iter_samples(language: str, split: str = "test") -> Iterator[dict]:
-    """Yield samples from dataset/{language}.jsonl filtered by split_name."""
-    path = DATASET_DIR / f"{language}.jsonl"
+    """Yield samples from dataset/{language}/{split}.jsonl."""
+    path = DATASET_DIR / language / f"{split}.jsonl"
     with open(path) as f:
         for line in f:
-            sample = json.loads(line)
-            if split is None or sample.get("split_name") == split:
-                yield sample
+            line = line.strip()
+            if line:
+                yield json.loads(line)
+
+
+def load_samples(language: str, split: str = "test") -> list[dict]:
+    return list(iter_samples(language, split))
 
 
 def load_projects(

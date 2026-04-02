@@ -9,7 +9,7 @@ class BaseSummarizer(ABC):
     name: str  # used as MLflow run tag and artifact prefix
 
     @abstractmethod
-    def summarize(self, code: str, language: str) -> str:
+    def summarize(self, code: str, language: str, project: str | None = None) -> str:
         """Generate a one-line summary for the given code snippet."""
         ...
 

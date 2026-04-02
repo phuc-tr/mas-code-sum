@@ -5,11 +5,14 @@ import io
 import tempfile
 from pathlib import Path
 
+import os
+
 import mlflow
 from dotenv import load_dotenv
 
 load_dotenv()
-mlflow.set_tracking_uri("mlruns/")
+mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000"))
+mlflow.openai.autolog()
 
 EXPERIMENT_NAME = "code-summarization"
 
@@ -39,12 +42,7 @@ def run_experiment(
 
     for project, samples in projects.items():
         project_languages = list({s["language"] for s in samples})
-
         references = [s["func_documentation_string"] for s in samples]
-        predictions = [method.summarize(s["func_code_string"], s["language"]) for s in samples]
-
-        metrics = compute_metrics(predictions, references)
-        print(f"  [{project}] {metrics}")
 
         with mlflow.start_run(run_name=f"{method.name}/{project}"):
             mlflow.log_params({
@@ -56,6 +54,11 @@ def run_experiment(
                 "max_samples_per_project": max_samples or "all",
                 **method.params(),
             })
+
+            predictions = [method.summarize(s["func_code_string"], s["language"], project=project) for s in samples]
+
+            metrics = compute_metrics(predictions, references)
+            print(f"  [{project}] {metrics}")
             mlflow.log_metrics(metrics)
             _log_predictions_artifact(samples, predictions, references)
 
