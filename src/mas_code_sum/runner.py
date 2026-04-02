@@ -9,7 +9,7 @@ import mlflow
 
 mlflow.set_tracking_uri("mlruns/")
 
-from .data import load_samples
+from .data import load_projects
 from .metrics import compute_metrics
 from .methods.base import BaseSummarizer
 
@@ -22,37 +22,36 @@ def run_experiment(
     max_samples: int | None = None,
 ) -> None:
     """
-    Run a summarization experiment across the given languages.
+    Run a summarization experiment across all projects found in the given languages.
 
     One MLflow experiment per call (named by experiment_name).
-    One MLflow run per language, logging params + metrics + predictions artifact.
-
-    Args:
-        method: a BaseSummarizer instance
-        experiment_name: MLflow experiment name (from the YAML config)
-        languages: list of language names to evaluate
-        split: dataset split to use
-        max_samples: cap samples per language (useful for quick iterations)
+    One MLflow run per project (repository_name), with language logged as a param.
+    max_samples caps the number of samples per project.
     """
     mlflow.set_experiment(experiment_name)
 
-    for language in languages:
-        print(f"  [{language}] loading samples...")
-        samples = load_samples(language, split=split, max_samples=max_samples)
+    print(f"Loading projects for languages: {languages}...")
+    projects = load_projects(languages, split=split, max_samples_per_project=max_samples)
+    print(f"Found {len(projects)} projects.")
+
+    for project, samples in projects.items():
+        # A project's samples may technically span languages, so log all unique ones.
+        project_languages = list({s["language"] for s in samples})
 
         references = [s["func_documentation_string"] for s in samples]
-        predictions = [method.summarize(s["func_code_string"], language) for s in samples]
+        predictions = [method.summarize(s["func_code_string"], s["language"]) for s in samples]
 
         metrics = compute_metrics(predictions, references)
-        print(f"  [{language}] {metrics}")
+        print(f"  [{project}] {metrics}")
 
-        with mlflow.start_run(run_name=language):
+        with mlflow.start_run(run_name=project):
             mlflow.log_params({
                 "method": method.name,
-                "language": language,
+                "project": project,
+                "language": project_languages[0] if len(project_languages) == 1 else str(project_languages),
                 "split": split,
                 "num_samples": len(samples),
-                "max_samples": max_samples or "all",
+                "max_samples_per_project": max_samples or "all",
                 **method.params(),
             })
             mlflow.log_metrics(metrics)

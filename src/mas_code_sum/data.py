@@ -1,6 +1,7 @@
 """Dataset loading utilities."""
 
 import json
+from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
 
@@ -18,10 +19,28 @@ def iter_samples(language: str, split: str = "test") -> Iterator[dict]:
                 yield sample
 
 
-def load_samples(language: str, split: str = "test", max_samples: int | None = None) -> list[dict]:
-    samples = []
-    for sample in iter_samples(language, split):
-        samples.append(sample)
-        if max_samples and len(samples) >= max_samples:
-            break
-    return samples
+def load_projects(
+    languages: list[str],
+    split: str = "test",
+    max_samples_per_project: int | None = None,
+) -> dict[str, list[dict]]:
+    """
+    Load samples grouped by repository_name (project) across the given languages.
+
+    Args:
+        languages: languages to load from
+        split: dataset split to use
+        max_samples_per_project: if set, cap the number of samples kept per project
+
+    Returns:
+        dict mapping repository_name -> list of samples
+    """
+    projects: dict[str, list[dict]] = defaultdict(list)
+
+    for language in languages:
+        for sample in iter_samples(language, split):
+            repo = sample["repository_name"]
+            if max_samples_per_project is None or len(projects[repo]) < max_samples_per_project:
+                projects[repo].append(sample)
+
+    return dict(projects)
