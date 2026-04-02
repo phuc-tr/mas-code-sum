@@ -12,6 +12,8 @@ dependencies = [
     "rouge-score>=0.1.2",
     "pyyaml>=6.0",
     "openai>=1.0",
+    "torch>=2.0",
+    "transformers==4.47.0",
 ]
 
 [dependency-groups]
