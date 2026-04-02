@@ -1,0 +1,17 @@
+# Experiment configuration
+# Run with: python run_experiment.py experiments/example.yaml
+
+experiment_name: exact_copy_baseline
+
+method: exact_copy            # key in REGISTRY in src/mas_code_sum/methods/__init__.py
+
+languages:
+  - python
+  - java
+  - javascript
+  - go
+  - php
+  - ruby
+
+split: test
+max_samples: 100              # set to null to use all samples
