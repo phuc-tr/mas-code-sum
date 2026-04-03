@@ -29,7 +29,7 @@ class CodeT5Summarizer(BaseSummarizer):
         with torch.no_grad():
             generated_ids = self._model.generate(input_ids, max_length=self.max_length)
 
-        return self._tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+        return self._tokenizer.decode(generated_ids[0], skip_special_tokens=True, clean_up_tokenization_spaces=True)
 
     def params(self) -> dict:
         return {
