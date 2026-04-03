@@ -3,22 +3,25 @@ import os
 from openai import OpenAI
 
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer
+from .base import BaseSummarizer, strip_code_fences
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-PROMPT_TEMPLATE = """\
-Here are some examples of {language} functions and their summaries:
+EXAMPLE_TEMPLATE = """\
+Code:
+{code}
+Summary: {docstring}"""
+
+FINAL_TEMPLATE = """\
+Here are some examples of code summarization from the same project:
 
 {examples}
-Now summarize the following {language} function. \
-Output only the summary, no explanation.
 
-```{language}
+Now summarize the following code in one sentence. Output only the summary, no explanation:
+
+Code:
 {code}
-```"""
-
-EXAMPLE_TEMPLATE = "```{language}\n{code}\n```: {summary}"
+Summary:"""
 
 
 class FewShotLLMSummarizer(BaseSummarizer):
@@ -36,22 +39,21 @@ class FewShotLLMSummarizer(BaseSummarizer):
 
     def summarize(self, code: str, language: str, project: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project)
-        examples_str = "\n\n".join(
-            EXAMPLE_TEMPLATE.format(
-                language=language,
-                code=s["code"],
-                summary=s["docstring"],
-            )
+        example_blocks = [
+            EXAMPLE_TEMPLATE.format(code=s["code"], docstring=s["docstring"])
             for s in examples
+        ]
+        prompt = FINAL_TEMPLATE.format(
+            examples="\n\n".join(example_blocks),
+            code=code,
         )
-        prompt = PROMPT_TEMPLATE.format(language=language, examples=examples_str, code=code)
         response = self._client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=128,
             temperature=0.0,
         )
-        return response.choices[0].message.content.strip()
+        return strip_code_fences(response.choices[0].message.content)
 
     def params(self) -> dict:
         return {"model": self.model, "retriever": type(self.retriever).__name__, "n_shots": self.retriever.n}

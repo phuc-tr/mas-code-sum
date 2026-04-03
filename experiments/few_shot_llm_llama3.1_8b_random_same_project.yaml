@@ -5,11 +5,11 @@ method_params:
 
 retriever: random_same_project
 retriever_params:
-  n: 3
+  n: 10
 
 languages:
   - python
   - java
 
 split: test
-max_samples: 10
+max_samples: 50

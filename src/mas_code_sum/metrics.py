@@ -1,39 +1,41 @@
 """Evaluation metrics for code summarization."""
 
-from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
+from difflib import SequenceMatcher
+
+from .evaluator import bleu as _bleu
 from rouge_score import rouge_scorer
 
 
 def compute_metrics(predictions: list[str], references: list[str]) -> dict[str, float]:
     """
-    Compute BLEU and ROUGE scores.
+    Compute BLEU, ROUGE-L, exact match, and edit similarity scores.
 
     Args:
         predictions: generated summaries
         references: ground truth summaries
 
     Returns:
-        dict with keys: bleu, rouge1, rouge2, rougeL
+        dict with keys: bleu, rougeL, exact_match, edit_sim
     """
-    # BLEU
-    tokenized_refs = [[ref.split()] for ref in references]
-    tokenized_preds = [pred.split() for pred in predictions]
-    smoother = SmoothingFunction().method1
-    bleu = corpus_bleu(tokenized_refs, tokenized_preds, smoothing_function=smoother)
+    # BLEU: per-sentence average using evaluator.py implementation (0-100 scale)
+    bleu_scores = [_bleu([ref], pred)[0] for pred, ref in zip(predictions, references)]
+    bleu = sum(bleu_scores) / len(bleu_scores) * 100
 
     # ROUGE
-    scorer = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
-    rouge1, rouge2, rougeL = 0.0, 0.0, 0.0
+    scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+    rougeL = 0.0
+    exact_match = 0.0
+    edit_sim = 0.0
     for pred, ref in zip(predictions, references):
         scores = scorer.score(ref, pred)
-        rouge1 += scores["rouge1"].fmeasure
-        rouge2 += scores["rouge2"].fmeasure
         rougeL += scores["rougeL"].fmeasure
+        exact_match += float(pred.strip() == ref.strip())
+        edit_sim += SequenceMatcher(None, pred.strip(), ref.strip()).ratio()
 
     n = len(predictions)
     return {
         "bleu": bleu,
-        "rouge1": rouge1 / n,
-        "rouge2": rouge2 / n,
         "rougeL": rougeL / n,
+        "exact_match": exact_match / n,
+        "edit_sim": edit_sim / n,
     }
