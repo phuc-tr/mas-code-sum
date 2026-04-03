@@ -1377,6 +1377,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "datasets" },
     { name = "dotenv" },
+    { name = "matplotlib" },
     { name = "mlflow" },
     { name = "nltk" },
     { name = "openai" },
@@ -1396,6 +1397,7 @@ dev = [
 requires-dist = [
     { name = "datasets", specifier = ">=4.8.4" },
     { name = "dotenv", specifier = ">=0.9.9" },
+    { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "mlflow", specifier = ">=2.0" },
     { name = "nltk", specifier = ">=3.8" },
     { name = "openai", specifier = ">=1.0" },

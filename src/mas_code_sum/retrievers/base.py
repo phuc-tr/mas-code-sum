@@ -12,7 +12,7 @@ class BaseRetriever(ABC):
         Return n training samples to use as few-shot examples.
 
         Each returned sample must have at least:
-            - func_code_string
-            - func_documentation_string
+            - code
+            - docstring
         """
         ...

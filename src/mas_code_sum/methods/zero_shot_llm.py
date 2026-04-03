@@ -7,7 +7,7 @@ from .base import BaseSummarizer
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 PROMPT_TEMPLATE = """\
-Summarize the following {language} function in one concise sentence. \
+Summarize the following {language} function. \
 Output only the summary, no explanation.
 
 ```{language}

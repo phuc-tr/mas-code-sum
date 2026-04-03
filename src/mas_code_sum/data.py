@@ -29,7 +29,7 @@ def load_projects(
     max_samples_per_project: int | None = None,
 ) -> dict[str, list[dict]]:
     """
-    Load samples grouped by repository_name (project) across the given languages.
+    Load samples grouped by repo (project) across the given languages.
 
     Args:
         languages: languages to load from
@@ -37,13 +37,13 @@ def load_projects(
         max_samples_per_project: if set, cap the number of samples kept per project
 
     Returns:
-        dict mapping repository_name -> list of samples
+        dict mapping repo -> list of samples
     """
     projects: dict[str, list[dict]] = defaultdict(list)
 
     for language in languages:
         for sample in iter_samples(language, split):
-            repo = sample["repository_name"]
+            repo = sample["repo"]
             if max_samples_per_project is None or len(projects[repo]) < max_samples_per_project:
                 projects[repo].append(sample)
 

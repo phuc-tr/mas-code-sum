@@ -18,7 +18,7 @@ class RandomSameProjectRetriever(BaseRetriever):
         if language not in self._cache:
             by_project: dict[str, list[dict]] = defaultdict(list)
             for sample in load_samples(language, split="train"):
-                by_project[sample["repository_name"]].append(sample)
+                by_project[sample["repo"]].append(sample)
             self._cache[language] = dict(by_project)
 
         pool = self._cache[language].get(project, []) if project else []

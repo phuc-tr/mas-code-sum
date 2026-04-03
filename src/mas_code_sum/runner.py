@@ -42,7 +42,7 @@ def run_experiment(
 
     for project, samples in projects.items():
         project_languages = list({s["language"] for s in samples})
-        references = [s["func_documentation_string"] for s in samples]
+        references = [s["docstring"] for s in samples]
 
         with mlflow.start_run(run_name=f"{method.name}/{project}"):
             mlflow.log_params({
@@ -55,7 +55,7 @@ def run_experiment(
                 **method.params(),
             })
 
-            predictions = [method.summarize(s["func_code_string"], s["language"], project=project) for s in samples]
+            predictions = [method.summarize(s["code"], s["language"], project=project) for s in samples]
 
             metrics = compute_metrics(predictions, references)
             print(f"  [{project}] {metrics}")

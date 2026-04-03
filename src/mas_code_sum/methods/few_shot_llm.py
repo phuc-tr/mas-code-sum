@@ -11,7 +11,7 @@ PROMPT_TEMPLATE = """\
 Here are some examples of {language} functions and their summaries:
 
 {examples}
-Now summarize the following {language} function in one concise sentence. \
+Now summarize the following {language} function. \
 Output only the summary, no explanation.
 
 ```{language}
@@ -39,8 +39,8 @@ class FewShotLLMSummarizer(BaseSummarizer):
         examples_str = "\n\n".join(
             EXAMPLE_TEMPLATE.format(
                 language=language,
-                code=s["func_code_string"],
-                summary=s["func_documentation_string"],
+                code=s["code"],
+                summary=s["docstring"],
             )
             for s in examples
         )
