@@ -12,7 +12,7 @@ class BaseRetriever(ABC):
         Return n training samples to use as few-shot examples.
 
         Each returned sample must have at least:
-            - code
-            - docstring
+            - code_tokens
+            - docstring_tokens
         """
         ...

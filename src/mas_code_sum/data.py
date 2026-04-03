@@ -1,6 +1,7 @@
 """Dataset loading utilities."""
 
 import json
+import random
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
@@ -43,8 +44,9 @@ def load_projects(
 
     for language in languages:
         for sample in iter_samples(language, split):
-            repo = sample["repo"]
-            if max_samples_per_project is None or len(projects[repo]) < max_samples_per_project:
-                projects[repo].append(sample)
+            projects[sample["repo"]].append(sample)
+
+    if max_samples_per_project is not None:
+        projects = {repo: random.sample(samples, min(max_samples_per_project, len(samples))) for repo, samples in projects.items()}
 
     return dict(projects)

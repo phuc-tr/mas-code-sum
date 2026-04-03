@@ -40,7 +40,7 @@ class FewShotLLMSummarizer(BaseSummarizer):
     def summarize(self, code: str, language: str, project: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project)
         example_blocks = [
-            EXAMPLE_TEMPLATE.format(code=s["code"], docstring=s["docstring"])
+            EXAMPLE_TEMPLATE.format(code=" ".join(s["code_tokens"]), docstring=" ".join(s["docstring_tokens"]))
             for s in examples
         ]
         prompt = FINAL_TEMPLATE.format(
