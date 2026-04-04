@@ -1,0 +1,16 @@
+method: few_shot_asap
+
+method_params:
+  model: meta-llama/llama-3.1-8b-instruct
+  use_repo: true
+
+retriever: bm25
+retriever_params:
+  n: 3
+
+languages:
+  - python
+  - java
+
+split: test
+max_samples: 50

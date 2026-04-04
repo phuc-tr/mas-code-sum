@@ -1,0 +1,17 @@
+method: few_shot_asap
+
+method_params:
+  model: openai/gpt-3.5-turbo
+  use_repo: true
+  use_dfg: true
+
+retriever: bm25
+retriever_params:
+  n: 3
+
+languages:
+  - python
+  - java
+
+split: test
+max_samples: 20
