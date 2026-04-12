@@ -13,7 +13,7 @@ class RandomRetriever(BaseRetriever):
         self.n = n
         self._cache: dict[str, list[dict]] = {}
 
-    def retrieve(self, code: str, language: str, n: int | None = None, project: str | None = None) -> list[dict]:
+    def retrieve(self, code: str, language: str, n: int | None = None, project: str | None = None, path: str | None = None) -> list[dict]:
         if language not in self._cache:
             self._cache[language] = load_samples(language, split="train")
         pool = self._cache[language]

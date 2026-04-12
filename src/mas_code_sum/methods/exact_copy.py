@@ -6,5 +6,5 @@ class ExactCopySummarizer(BaseSummarizer):
 
     name = "exact_copy"
 
-    def summarize(self, code: str, language: str, project: str | None = None) -> str:
+    def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         return code

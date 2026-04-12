@@ -1,6 +1,6 @@
 import os
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from ..retrievers.base import BaseRetriever
 from .base import BaseSummarizer, strip_code_fences
@@ -29,16 +29,36 @@ class FewShotLLMSummarizer(BaseSummarizer):
 
     name = "few_shot_llm"
 
-    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", retriever: BaseRetriever = None):
+    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", retriever: BaseRetriever = None, max_concurrency: int = 5):
         self.model = model
         self.retriever = retriever
+        self.max_concurrency = max_concurrency
         self._client = OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url=OPENROUTER_BASE_URL,
         )
+        self._async_client = AsyncOpenAI(
+            api_key=os.environ["OPENROUTER_API_KEY"],
+            base_url=OPENROUTER_BASE_URL,
+        )
 
-    def summarize(self, code: str, language: str, project: str | None = None) -> str:
-        examples = self.retriever.retrieve(code, language, project=project)
+    async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
+        examples = self.retriever.retrieve(code, language, project=project, path=path)
+        example_blocks = [
+            EXAMPLE_TEMPLATE.format(code=" ".join(s["code_tokens"]), docstring=" ".join(s["docstring_tokens"]))
+            for s in examples
+        ]
+        prompt = FINAL_TEMPLATE.format(examples="\n\n".join(example_blocks), code=code)
+        response = await self._async_client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=128,
+            temperature=0.0,
+        )
+        return strip_code_fences(response.choices[0].message.content)
+
+    def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
+        examples = self.retriever.retrieve(code, language, project=project, path=path)
         example_blocks = [
             EXAMPLE_TEMPLATE.format(code=" ".join(s["code_tokens"]), docstring=" ".join(s["docstring_tokens"]))
             for s in examples

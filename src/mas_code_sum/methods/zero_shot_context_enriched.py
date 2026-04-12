@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from .base import BaseSummarizer, strip_code_fences
 
@@ -58,12 +58,31 @@ class ZeroShotContextEnrichedSummarizer(BaseSummarizer):
 
     name = "zero_shot_context_enriched"
 
-    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct"):
+    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", max_concurrency: int = 10):
         self.model = model
+        self.max_concurrency = max_concurrency
         self._client = OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url=OPENROUTER_BASE_URL,
         )
+        self._async_client = AsyncOpenAI(
+            api_key=os.environ["OPENROUTER_API_KEY"],
+            base_url=OPENROUTER_BASE_URL,
+        )
+
+    async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
+        if project:
+            ctx = _get_metadata_index().get(project, {"about": "N/A"})
+            prompt = PROMPT_TEMPLATE.format(repo=project, about=ctx["about"], path=path or "unknown", code=code)
+        else:
+            prompt = PROMPT_TEMPLATE_NO_CONTEXT.format(code=code)
+        response = await self._async_client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=128,
+            temperature=0.0,
+        )
+        return strip_code_fences(response.choices[0].message.content)
 
     def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         if project:

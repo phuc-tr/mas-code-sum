@@ -14,7 +14,7 @@ class RandomSameProjectRetriever(BaseRetriever):
         self.n = n
         self._cache: dict[str, dict[str, list[dict]]] = {}  # language -> project -> samples
 
-    def retrieve(self, code: str, language: str, n: int | None = None, project: str | None = None) -> list[dict]:
+    def retrieve(self, code: str, language: str, n: int | None = None, project: str | None = None, path: str | None = None) -> list[dict]:
         if language not in self._cache:
             by_project: dict[str, list[dict]] = defaultdict(list)
             for sample in load_samples(language, split="train"):

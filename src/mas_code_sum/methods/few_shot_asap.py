@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import os
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from ..enrichers.dfg_loader import get_dfg_loader
 from ..enrichers.identifier_extractor import extract_identifier_context
@@ -119,13 +119,56 @@ class FewShotAsapSummarizer(BaseSummarizer):
         self.retriever = retriever
         self.use_repo = use_repo
         self.use_dfg = use_dfg
+        self.max_concurrency = 10
         self._client = OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url=OPENROUTER_BASE_URL,
         )
+        self._async_client = AsyncOpenAI(
+            api_key=os.environ["OPENROUTER_API_KEY"],
+            base_url=OPENROUTER_BASE_URL,
+        )
+
+    async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
+        examples = self.retriever.retrieve(code, language, project=project, path=path)
+
+        repo_ctx: str | None = None
+        if self.use_repo and project:
+            meta = _get_metadata_index().get(project, {})
+            about = meta.get("about") or "N/A"
+            repo_ctx = f"Repository: {project}\nDescription: {about}\nFile: {path or 'unknown'}"
+
+        dfg_loader = get_dfg_loader() if self.use_dfg else None
+
+        blocks: list[str] = []
+        for s in examples:
+            ex_code = " ".join(s["code_tokens"])
+            ex_docstring = " ".join(s["docstring_tokens"])
+            ex_func = s.get("func_name")
+            ex_lang = s.get("language", language)
+            ex_dfg: str | None = None
+            if dfg_loader:
+                ex_url = s.get("url", "")
+                ex_dfg = dfg_loader.get(ex_lang, ex_url, split="train") or _NO_DFG
+            blocks.append(_build_block(ex_code, ex_lang, ex_func, repo_ctx, ex_dfg, docstring=ex_docstring))
+
+        query_dfg: str | None = None
+        if dfg_loader:
+            query_dfg = dfg_loader.get(language, url or "", split="test") or _NO_DFG
+        blocks.append(_build_block(code, language, None, repo_ctx, query_dfg, docstring=None, dfg_before_id3=True))
+
+        prompt = "\n\n".join(blocks)
+        response = await self._async_client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=128,
+            temperature=0.0,
+        )
+        raw = response.choices[0].message.content or ""
+        return strip_code_fences(raw.split("\n")[0].strip())
 
     def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
-        examples = self.retriever.retrieve(code, language, project=project)
+        examples = self.retriever.retrieve(code, language, project=project, path=path)
 
         # Repo context (same block for all examples and the query)
         repo_ctx: str | None = None

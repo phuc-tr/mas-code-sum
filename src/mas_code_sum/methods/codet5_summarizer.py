@@ -10,18 +10,34 @@ class CodeT5Summarizer(BaseSummarizer):
 
     name = "codet5"
 
-    def __init__(self, max_length: int = 20):
+    def __init__(self, max_length: int = 20, batch_size: int = 32):
         from transformers import AutoTokenizer, T5ForConditionalGeneration
         import torch
 
         self.max_length = max_length
+        self.batch_size = batch_size
         self._tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         self._model = T5ForConditionalGeneration.from_pretrained(MODEL_NAME)
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._model.to(self._device)
         self._model.eval()
 
-    def summarize(self, code: str, language: str, project: str | None = None) -> str:
+    def summarize_batch(self, codes: list[str], languages: list[str], **kwargs) -> list[str]:
+        import torch
+
+        results = []
+        for i in range(0, len(codes), self.batch_size):
+            batch = codes[i : i + self.batch_size]
+            inputs = self._tokenizer(batch, return_tensors="pt", padding=True, truncation=True)
+            inputs = {k: v.to(self._device) for k, v in inputs.items()}
+            with torch.no_grad():
+                generated_ids = self._model.generate(**inputs, max_length=self.max_length)
+            results.extend(
+                self._tokenizer.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+            )
+        return results
+
+    def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         import torch
 
         input_ids = self._tokenizer(code, return_tensors="pt").input_ids.to(self._device)

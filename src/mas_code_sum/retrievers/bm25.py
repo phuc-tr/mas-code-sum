@@ -20,7 +20,7 @@ class BM25Retriever(BaseRetriever):
             self._samples[language] = samples
             self._index[language] = BM25Okapi([s["code_tokens"] for s in samples])
 
-    def retrieve(self, code: str, language: str, n: int | None = None, project: str | None = None) -> list[dict]:
+    def retrieve(self, code: str, language: str, n: int | None = None, project: str | None = None, path: str | None = None) -> list[dict]:
         self._ensure_index(language)
         k = n or self.n
         query = code.split()

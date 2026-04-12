@@ -60,7 +60,7 @@ class FewShotContextEnrichedSummarizer(BaseSummarizer):
         )
 
     def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
-        examples = self.retriever.retrieve(code, language, project=project)
+        examples = self.retriever.retrieve(code, language, project=project, path=path)
         example_blocks = [
             EXAMPLE_TEMPLATE.format(code=" ".join(s["code_tokens"]), docstring=" ".join(s["docstring_tokens"]))
             for s in examples
