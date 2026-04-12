@@ -1,13 +1,34 @@
 """Abstract base class for summarization methods."""
 
 import asyncio
+import os
 import re
 from abc import ABC, abstractmethod
 
+from openai import AsyncOpenAI, OpenAI
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+_LLM_TIMEOUT = 60.0
+_LLM_MAX_RETRIES = 3
+
+
+def make_openai_clients() -> tuple[OpenAI, AsyncOpenAI]:
+    """Create sync and async OpenAI clients pointed at OpenRouter with shared timeout/retry config."""
+    kwargs = dict(
+        api_key=os.environ["OPENROUTER_API_KEY"],
+        base_url=OPENROUTER_BASE_URL,
+        timeout=_LLM_TIMEOUT,
+        max_retries=_LLM_MAX_RETRIES,
+    )
+    return OpenAI(**kwargs), AsyncOpenAI(**kwargs)
+
 
 def strip_code_fences(text: str) -> str:
-    """Remove markdown code fences and triple-quotes from LLM output."""
+    """Remove markdown code fences, triple-quotes, and <think> blocks from LLM output."""
     text = text.strip()
+    # Strip <think>...</think> block (may start with </think> if opening tag was truncated)
+    text = re.sub(r"^<think>.*?</think>\s*", "", text, flags=re.DOTALL)
+    text = re.sub(r"^</think>\s*", "", text)
     text = re.sub(r"^```[^\n]*\n?", "", text)
     text = re.sub(r"\n?```$", "", text)
     text = re.sub(r'^"""\n?', "", text)

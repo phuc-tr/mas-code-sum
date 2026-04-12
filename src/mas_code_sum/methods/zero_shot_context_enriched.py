@@ -1,14 +1,10 @@
 """Zero-shot summarizer enriched with repository context (name, about, README, file path)."""
 
 import json
-import os
 from pathlib import Path
 
-from openai import AsyncOpenAI, OpenAI
+from .base import BaseSummarizer, make_openai_clients, strip_code_fences
 
-from .base import BaseSummarizer, strip_code_fences
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 METADATA_PATH = Path(__file__).parents[3] / "dataset" / "repo_metadata" / "all_repo_metadata.json"
 
 PROMPT_TEMPLATE = """\
@@ -61,14 +57,7 @@ class ZeroShotContextEnrichedSummarizer(BaseSummarizer):
     def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", max_concurrency: int = 10):
         self.model = model
         self.max_concurrency = max_concurrency
-        self._client = OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
-        self._async_client = AsyncOpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
+        self._client, self._async_client = make_openai_clients()
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         if project:

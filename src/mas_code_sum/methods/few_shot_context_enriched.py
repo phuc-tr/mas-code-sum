@@ -1,16 +1,11 @@
 """Few-shot summarizer enriched with repository context (name, about, file path)."""
 
 import json
-import os
 from pathlib import Path
 
-from openai import OpenAI
-
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, strip_code_fences
+from .base import BaseSummarizer, make_openai_clients, strip_code_fences
 from .zero_shot_context_enriched import _get_metadata_index
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 EXAMPLE_TEMPLATE = """\
 Code:
@@ -80,10 +75,7 @@ class FewShotContextEnrichedSummarizer(BaseSummarizer):
         self.model = model
         self.retriever = retriever
         self.example_paths = example_paths
-        self._client = OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
+        self._client, _ = make_openai_clients()
 
     def _format_example(self, s: dict) -> str:
         code = " ".join(s["code_tokens"])
@@ -112,10 +104,16 @@ class FewShotContextEnrichedSummarizer(BaseSummarizer):
         response = self._client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=128,
+            max_tokens=256,
             temperature=0.0,
         )
-        return strip_code_fences(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        if content is None:
+            raise ValueError(
+                f"Model {self.model!r} returned null content "
+                f"(finish_reason={response.choices[0].finish_reason!r})"
+            )
+        return strip_code_fences(content)
 
     def params(self) -> dict:
         return {

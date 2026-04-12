@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-import os
-
-from openai import OpenAI
-
 from ..retrievers.base import BaseRetriever
 from ..style_guide import build_style_guide
-from .base import BaseSummarizer, strip_code_fences
+from .base import BaseSummarizer, make_openai_clients, strip_code_fences
 from .zero_shot_context_enriched import _get_metadata_index
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 _EXAMPLE_TEMPLATE = """\
 Code:
@@ -62,10 +56,7 @@ class StyleGuidedSummarizer(BaseSummarizer):
         self.style_model = style_model or model
         self.retriever = retriever
         self.n_style_samples = n_style_samples
-        self._client = OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
+        self._client, _ = make_openai_clients()
         self._style_cache: dict[tuple[str, str], str] = {}
 
     def _get_style_guide(self, project: str, language: str) -> str:

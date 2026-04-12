@@ -1,11 +1,5 @@
-import os
-
-from openai import AsyncOpenAI, OpenAI
-
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, strip_code_fences
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+from .base import BaseSummarizer, make_openai_clients, strip_code_fences
 
 EXAMPLE_TEMPLATE = """\
 Code:
@@ -33,14 +27,7 @@ class FewShotLLMSummarizer(BaseSummarizer):
         self.model = model
         self.retriever = retriever
         self.max_concurrency = max_concurrency
-        self._client = OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
-        self._async_client = AsyncOpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
+        self._client, self._async_client = make_openai_clients()
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)

@@ -1,14 +1,8 @@
 """Few-shot summarizer with a critic agent that refines the initial summary."""
 
-import os
-
-from openai import OpenAI
-
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, strip_code_fences
+from .base import BaseSummarizer, make_openai_clients, strip_code_fences
 from .zero_shot_context_enriched import _get_metadata_index
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 EXAMPLE_TEMPLATE = """\
 Code:
@@ -72,10 +66,7 @@ class FewShotCriticSummarizer(BaseSummarizer):
         self.model = model
         self.critic_model = critic_model or model
         self.retriever = retriever
-        self._client = OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
+        self._client, _ = make_openai_clients()
 
     def summarize(self, code: str, language: str, project: str, path: str, url: str | None = None) -> str:
         ctx = _get_metadata_index()[project]

@@ -1,18 +1,13 @@
 """Few-shot summarizer with randomized repository context (name, about, file path from a different project)."""
 
 import json
-import os
 import random
-
-from openai import OpenAI
 
 from ..data import DATASET_DIR
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, strip_code_fences
+from .base import BaseSummarizer, make_openai_clients, strip_code_fences
 from .few_shot_context_enriched import EXAMPLE_TEMPLATE, PROMPT_TEMPLATE, PROMPT_TEMPLATE_NO_CONTEXT
 from .zero_shot_context_enriched import _get_metadata_index
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 _PATH_INDEX: dict[str, list[str]] | None = None
 
@@ -52,10 +47,7 @@ class FewShotRandomContextEnrichedSummarizer(BaseSummarizer):
     def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", retriever: BaseRetriever = None):
         self.model = model
         self.retriever = retriever
-        self._client = OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
+        self._client, _ = make_openai_clients()
 
     def _random_context(self, project: str) -> tuple[str, str, str]:
         """Return (random_repo, about, random_path) from a project other than the given one."""

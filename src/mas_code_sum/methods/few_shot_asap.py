@@ -29,17 +29,11 @@ DFG requires pre-computation:
 
 from __future__ import annotations
 
-import os
-
-from openai import AsyncOpenAI, OpenAI
-
 from ..enrichers.dfg_loader import get_dfg_loader
 from ..enrichers.identifier_extractor import extract_identifier_context
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, strip_code_fences
+from .base import BaseSummarizer, make_openai_clients, strip_code_fences
 from .zero_shot_context_enriched import _get_metadata_index
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 _COMMENT_PROMPT = "Write down the original comment written by the developer."
 _NO_DFG = "Please find the dataflow of the function. We present the source and list of target indices.\nNo DFG available"
@@ -120,14 +114,7 @@ class FewShotAsapSummarizer(BaseSummarizer):
         self.use_repo = use_repo
         self.use_dfg = use_dfg
         self.max_concurrency = 10
-        self._client = OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
-        self._async_client = AsyncOpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
+        self._client, self._async_client = make_openai_clients()
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)

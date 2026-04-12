@@ -1,10 +1,4 @@
-import os
-
-from openai import AsyncOpenAI, OpenAI
-
-from .base import BaseSummarizer, strip_code_fences
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+from .base import BaseSummarizer, make_openai_clients, strip_code_fences
 
 PROMPT_TEMPLATE = """\
 Please generate a short comment in one sentence for the following function. Output only the summary, no explanation:
@@ -21,14 +15,7 @@ class ZeroShotLLMSummarizer(BaseSummarizer):
     def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", max_concurrency: int = 10):
         self.model = model
         self.max_concurrency = max_concurrency
-        self._client = OpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
-        self._async_client = AsyncOpenAI(
-            api_key=os.environ["OPENROUTER_API_KEY"],
-            base_url=OPENROUTER_BASE_URL,
-        )
+        self._client, self._async_client = make_openai_clients()
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         response = await self._async_client.chat.completions.create(
