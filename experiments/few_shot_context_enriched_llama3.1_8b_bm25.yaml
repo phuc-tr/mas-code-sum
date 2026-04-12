@@ -16,4 +16,5 @@ languages:
   # - ruby
 
 split: test
-max_samples: 50
+max_samples: null
+num_runs: 3

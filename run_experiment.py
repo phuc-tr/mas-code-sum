@@ -35,8 +35,8 @@ def main(config_path: str) -> None:
     run_experiment(
         method=method,
         languages=cfg["languages"],
-        split=cfg.get("split", "test"),
         max_samples=cfg.get("max_samples"),
+        num_runs=cfg.get("num_runs", 1),
     )
 
 
