@@ -1,0 +1,20 @@
+method: few_shot_context_enriched
+
+method_params:
+  model: openai/gpt-3.5-turbo
+
+retriever: bm25
+retriever_params:
+  n: 10
+
+languages:
+  - python
+  - java
+  # - javascript
+  # - go
+  # - php
+  # - ruby
+
+split: test
+max_samples: null
+num_runs: 1
