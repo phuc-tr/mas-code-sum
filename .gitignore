@@ -4,5 +4,7 @@ __pycache__/
 *.pyc
 mlruns/
 mlflow.db
+mlartifacts/
+.cache/
 dataset/
 notebooks/
