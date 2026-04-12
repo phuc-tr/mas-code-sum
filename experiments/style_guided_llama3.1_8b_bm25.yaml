@@ -1,0 +1,17 @@
+method: style_guided
+
+method_params:
+  model: meta-llama/llama-3.1-8b-instruct
+  n_style_samples: 20
+
+retriever: bm25
+retriever_params:
+  n: 10
+
+languages:
+  - python
+  - java
+
+split: test
+max_samples: null
+num_runs: 1

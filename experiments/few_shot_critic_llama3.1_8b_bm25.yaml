@@ -1,0 +1,21 @@
+method: few_shot_critic
+
+method_params:
+  model: meta-llama/llama-3.1-8b-instruct
+  critic_model: meta-llama/llama-3.1-8b-instruct
+
+retriever: bm25
+retriever_params:
+  n: 10
+
+languages:
+  - python
+  - java
+  # - javascript
+  # - go
+  # - php
+  # - ruby
+
+split: test
+max_samples: null
+num_runs: 3

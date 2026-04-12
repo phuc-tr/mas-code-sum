@@ -114,12 +114,12 @@ def run_experiment(
 
 
 def _log_predictions_artifact(rows: list[tuple[dict, int, str, str]]) -> None:
-    """Write a CSV of (project, func_name, run, reference, prediction) and log as MLflow artifact."""
+    """Write a CSV of (id, project, func_name, run, reference, prediction) and log as MLflow artifact."""
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=["project", "func_name", "run", "reference", "prediction"])
+    writer = csv.DictWriter(buf, fieldnames=["id", "project", "func_name", "run", "reference", "prediction"])
     writer.writeheader()
     for sample, run_idx, pred, ref in rows:
-        writer.writerow({"project": sample["repo"], "func_name": sample["func_name"], "run": run_idx, "reference": ref, "prediction": pred})
+        writer.writerow({"id": sample["id"], "project": sample["repo"], "func_name": sample["func_name"], "run": run_idx, "reference": ref, "prediction": pred})
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         f.write(buf.getvalue())
