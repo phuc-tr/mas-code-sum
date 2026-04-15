@@ -9,12 +9,14 @@ A framework for experimenting with code summarization methods and tracking resul
 - [Project Structure](#project-structure)
 - [Setup](#setup)
 - [Dataset](#dataset)
-  - [Data Collection](#data-collection)
-  - [Train/Test Split](#traintest-split)
+  - [Standard Dataset](#standard-dataset)
+  - [Same-project Dataset](#same-project-dataset)
   - [Schema](#schema)
 - [Running Experiments](#running-experiments)
   - [Experiment Config](#experiment-config)
   - [MLflow Tracking](#mlflow-tracking)
+- [Methods](#methods)
+- [Retrievers](#retrievers)
 - [Adding a New Method](#adding-a-new-method)
 - [Adding a New Metric](#adding-a-new-metric)
 
@@ -27,21 +29,49 @@ mas-code-sum/
 ├── dataset/
 │   ├── collect_data.py          # Step 1: pull data from HuggingFace + git blame
 │   ├── split_jsonl_by_blame.py  # Step 2: split into train/test by blame timestamp
-│   ├── python.jsonl             # raw collected samples per language
 │   ├── python/
 │   │   ├── train.jsonl
-│   │   └── test.jsonl           # ← used by experiments
-│   └── ...                      # same structure for java, go, etc.
+│   │   └── test.jsonl
+│   ├── Same-project/            # same-project dataset (one subdir per project)
+│   │   └── {project}/
+│   │       ├── train.jsonl
+│   │       └── test.jsonl
+│   └── repos/                   # cloned repos (used by file_context enricher)
 ├── experiments/
-│   └── example.yaml             # experiment config
+│   └── *.yaml                   # experiment configs
+├── scripts/                     # one-off analysis and backfill scripts
 ├── src/mas_code_sum/
 │   ├── data.py                  # dataset loading, grouping by project
-│   ├── metrics.py               # BLEU + ROUGE scoring
+│   ├── metrics.py               # BLEU, ROUGE-L, BERTScore
 │   ├── runner.py                # MLflow-integrated experiment runner
-│   └── methods/
-│       ├── __init__.py          # method registry (REGISTRY dict)
-│       ├── base.py              # BaseSummarizer abstract class
-│       └── exact_copy.py        # example baseline method
+│   ├── evaluator.py             # BLEU implementation
+│   ├── style_guide.py           # style guide construction helper
+│   ├── methods/
+│   │   ├── __init__.py          # REGISTRY dict
+│   │   ├── base.py              # BaseSummarizer + async batch execution
+│   │   ├── exact_copy.py
+│   │   ├── zero_shot_llm.py
+│   │   ├── zero_shot_context_enriched.py
+│   │   ├── few_shot_llm.py
+│   │   ├── few_shot_context_enriched.py
+│   │   ├── few_shot_file_context.py
+│   │   ├── few_shot_critic.py
+│   │   ├── few_shot_asap.py
+│   │   ├── codet5_summarizer.py
+│   │   └── style_guided.py
+│   ├── retrievers/
+│   │   ├── __init__.py          # RETRIEVER_REGISTRY dict
+│   │   ├── base.py              # BaseRetriever abstract class
+│   │   ├── random.py
+│   │   ├── random_same_project.py
+│   │   ├── bm25.py
+│   │   ├── directory.py
+│   │   └── hyde.py
+│   └── enrichers/
+│       ├── dfg_loader.py        # data-flow graph features
+│       ├── identifier_extractor.py
+│       ├── file_context.py      # module doc, class context, imports (Python)
+│       └── file_context_java.py # same for Java
 ├── run_experiment.py            # CLI entrypoint
 └── pyproject.toml
 ```
@@ -56,56 +86,65 @@ This project uses [uv](https://github.com/astral-sh/uv) for dependency managemen
 uv sync
 ```
 
+LLM methods call models via [OpenRouter](https://openrouter.ai). Set the API key before running:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+MLflow tracking URI defaults to `http://127.0.0.1:5000`. Override with:
+
+```bash
+export MLFLOW_TRACKING_URI=http://...
+```
+
 ---
 
 ## Dataset
 
-### Data Collection
+### Standard Dataset
 
 `dataset/collect_data.py` builds the raw dataset from scratch. It:
 
 1. Loads the [`code-search-net/code_search_net`](https://huggingface.co/datasets/code-search-net/code_search_net) test split from HuggingFace.
 2. Picks repositories that have between 30–50 samples per language (5 repos per language, seeded for reproducibility).
-3. For each repo, runs `git blame` on every function to record the `latest_blame_timestamp` — the last time that code was touched.
+3. For each repo, runs `git blame` on every function to record the `latest_blame_timestamp`.
 4. Writes one `{language}.jsonl` file per language under `dataset/`.
 
 ```bash
-cd dataset
-python collect_data.py
+cd dataset && python collect_data.py
 ```
 
-Requires `git` to be installed. Repos are cloned temporarily and deleted after blame is collected.
-
-### Train/Test Split
-
-`dataset/split_jsonl_by_blame.py` reads the raw `.jsonl` files and splits them per repository by blame recency:
+`dataset/split_jsonl_by_blame.py` then splits each file per repo by blame recency:
 
 - The **N=30 most recently modified** functions per repo → `test.jsonl`
 - The rest → `train.jsonl`
 
-This simulates a realistic evaluation scenario where the test set contains newer code than the training set.
-
 ```bash
-cd dataset
-python split_jsonl_by_blame.py
+cd dataset && python split_jsonl_by_blame.py
 ```
 
-Output is written to `dataset/{language}/train.jsonl` and `dataset/{language}/test.jsonl`.
+### Same-project Dataset
+
+The `dataset/Same-project/` directory holds a separate benchmark where the train and test sets come from the same repositories (used to study in-project retrieval). Each subdirectory is one project and contains its own `train.jsonl` / `test.jsonl`.
+
+To use this dataset in an experiment, set `dataset: same-project` in the config (and omit `languages`).
 
 ### Schema
 
-Each sample in a `.jsonl` file is a JSON object with the following fields:
+Each sample in a `.jsonl` file is a JSON object with these fields:
 
 | Field | Description |
 |---|---|
-| `repository_name` | GitHub repo (`owner/repo`) — used to group samples into projects |
+| `id` | Unique sample identifier |
+| `repo` | GitHub repo (`owner/repo`) |
 | `language` | Programming language |
 | `func_name` | Function name |
-| `func_code_string` | Full function source code |
-| `func_documentation_string` | Ground truth docstring/summary |
-| `func_code_url` | GitHub permalink to the function |
-| `latest_blame_timestamp` | ISO timestamp of the most recently modified line in the function |
-| `split_name` | `"train"` or `"test"` |
+| `code_tokens` | Tokenized function source code |
+| `docstring_tokens` | Tokenized ground truth docstring |
+| `path` | File path within the repository |
+| `url` | GitHub permalink to the function |
+| `latest_blame_timestamp` | ISO timestamp of the most recently modified line |
 
 ---
 
@@ -115,59 +154,91 @@ Each sample in a `.jsonl` file is a JSON object with the following fields:
 python run_experiment.py experiments/example.yaml
 ```
 
-Then open the MLflow UI to browse results:
+Then open the MLflow UI:
 
 ```bash
-mlflow ui --backend-store-uri mlruns/
+mlflow ui
 ```
 
 ### Experiment Config
 
-Each experiment is defined by a YAML file in `experiments/`:
-
 ```yaml
-method: zero_shot_llm                  # key in REGISTRY (see src/mas_code_sum/methods/__init__.py)
+method: few_shot_context_enriched   # key in REGISTRY
 
-method_params:                         # passed as kwargs to the method constructor (optional)
+method_params:                       # kwargs passed to the method constructor
   model: meta-llama/llama-3.1-8b-instruct
 
-languages:                             # which languages to load samples from
+retriever: bm25                      # optional; key in RETRIEVER_REGISTRY
+retriever_params:
+  n: 10
+
+dataset: standard                    # "standard" (language-based) or "same-project"
+
+languages:                           # required when dataset=standard
   - python
   - java
-  - javascript
-  - go
-  - php
-  - ruby
 
-split: test                            # which split to evaluate on (train or test)
-max_samples: 100                       # max samples per project; set to null for all
+split: test
+max_samples: 100                     # max samples per project; null = all
+num_runs: 1                          # repeat each sample N times, average metrics
+projects:                            # optional; filter to specific project names
+  - apache__airflow
 ```
 
-To run a different method or model, create a new YAML pointing at it. All runs always land in the same MLflow experiment.
+The `retriever` is constructed first and injected into the method via `method_params`. `run_experiment.py` never needs to change when you add new methods or retrievers.
 
 ### MLflow Tracking
 
-All runs are collected under a single MLflow experiment: **`code-summarization`**.
+All runs land under the **`code-summarization`** experiment. Each run represents one full method invocation across all projects and is named after the method.
 
-Each **run** represents one `(method, project)` pair and is named `{method}/{project}` (e.g. `zero_shot_llm/ekzhu/datasketch`). This means you can filter runs by the `method` param in the UI and compare the same project across different methods side by side.
+Per-project metrics are logged with a `{project}/` prefix. Aggregate metrics (no prefix) summarise across all projects.
 
-Every run logs:
+**Params logged per run:**
+- `method`, `dataset`, `languages`, `split`, `num_runs`, `num_samples`, `max_samples_per_project`
+- All hyperparameters returned by the method's `params()` method (e.g. `model`, `retriever`, `n_shots`)
 
-**Params**
-- `method` — method name
-- `project` — repository name
-- `language` — programming language of the project
-- `split` — dataset split used
-- `num_samples` — number of samples evaluated
-- `max_samples_per_project` — cap from the config
-- any hyperparameters returned by the method's `params()` method (e.g. `model`)
+**Metrics logged:**
+- `bleu` — sentence-level BLEU averaged across samples (0–100 scale)
+- `rougeL` — average ROUGE-L F1
+- `bertscore_f1` — average BERTScore F1 (roberta-large)
 
-**Metrics**
-- `bleu` — corpus BLEU with smoothing
-- `rouge1`, `rouge2`, `rougeL` — average F1 across samples
+**Artifacts:**
+- `predictions/*.csv` — columns: `id`, `project`, `func_name`, `run`, `reference`, `prediction`
 
-**Artifacts**
-- `predictions/` — a CSV with columns `func_name`, `reference`, `prediction`
+---
+
+## Methods
+
+| Key | Class | Description |
+|---|---|---|
+| `exact_copy` | `ExactCopySummarizer` | Returns the raw code as-is (sanity baseline) |
+| `zero_shot_llm` | `ZeroShotLLMSummarizer` | Plain zero-shot prompt via LLM |
+| `zero_shot_context_enriched` | `ZeroShotContextEnrichedSummarizer` | Zero-shot + repo name/description in prompt |
+| `few_shot_llm` | `FewShotLLMSummarizer` | Few-shot with retrieved examples |
+| `few_shot_context_enriched` | `FewShotContextEnrichedSummarizer` | Few-shot + repo/file context in each block |
+| `few_shot_file_context` | `FewShotFileContextSummarizer` | Few-shot + file-level context (module doc, class, imports) |
+| `few_shot_critic` | `FewShotCriticSummarizer` | Generate then self-critique and refine |
+| `few_shot_asap` | `FewShotAsapSummarizer` | Replicates the ASAP completion-style prompt |
+| `codet5` | `CodeT5Summarizer` | Fine-tuned CodeT5 model (no LLM API required) |
+| `style_guided` | `StyleGuidedSummarizer` | Few-shot with a project-level style guide derived from training summaries |
+
+LLM-based methods call models via OpenRouter using the OpenAI-compatible API. The base URL and client construction are centralized in `src/mas_code_sum/methods/base.py`.
+
+---
+
+## Retrievers
+
+Retrievers fetch training examples for few-shot methods. They are configured separately in the experiment YAML.
+
+| Key | Class | Description |
+|---|---|---|
+| `random` | `RandomRetriever` | Random samples from the training split |
+| `random_same_project` | `RandomSameProjectRetriever` | Random samples from the same project |
+| `bm25` | `BM25Retriever` | BM25 lexical similarity over code tokens |
+| `directory` | `DirectoryRetriever` | Examples from the same directory as the query |
+| `hyde` | `HyDERetriever` | HyDE: generate a hypothetical docstring, retrieve by BM25 over docstring tokens |
+
+All retrievers implement `BaseRetriever.retrieve(code, language, n, project, path) -> list[dict]`.
 
 ---
 
@@ -181,56 +252,41 @@ from .base import BaseSummarizer
 class MyMethodSummarizer(BaseSummarizer):
     name = "my_method"
 
-    def summarize(self, code: str, language: str) -> str:
-        # generate and return a summary string
+    def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         ...
 
     def params(self) -> dict:
-        # return any hyperparameters to log in MLflow
         return {"model": "...", "temperature": 0.7}
 ```
 
-The interface is minimal:
-- `name` — string identifier, used as a label in MLflow
-- `summarize(code, language) -> str` — given source code and its language, return a summary
-- `params() -> dict` — optional; return hyperparameters to log
+For LLM methods, override `async_summarize` instead — the base class `summarize_batch` runs all async calls concurrently via `asyncio` with a configurable semaphore (`self.max_concurrency`).
 
-**Step 2** — Register it in `src/mas_code_sum/methods/__init__.py`:
+**Step 2** — Register in `src/mas_code_sum/methods/__init__.py`:
 
 ```python
-from .exact_copy import ExactCopySummarizer
 from .my_method import MyMethodSummarizer
 
 REGISTRY = {
-    "exact_copy": ExactCopySummarizer,
+    ...,
     "my_method": MyMethodSummarizer,
 }
 ```
 
-**Step 3** — Create an experiment config in `experiments/my_experiment.yaml` and run it.
-
-`run_experiment.py` never needs to change.
+**Step 3** — Create `experiments/my_experiment.yaml` and run it.
 
 ---
 
 ## Adding a New Metric
 
-All metrics are computed in `src/mas_code_sum/metrics.py` inside `compute_metrics()`, which takes lists of predictions and references and returns a flat `dict[str, float]`. Every key in that dict is automatically logged to MLflow.
-
-To add a new metric, extend the returned dict:
+All metrics live in `src/mas_code_sum/metrics.py` inside `compute_metrics()`. Every key in the returned dict is automatically logged to MLflow.
 
 ```python
-from some_library import compute_codebleu
-
 def compute_metrics(predictions: list[str], references: list[str]) -> dict[str, float]:
     ...
-    codebleu = compute_codebleu(references, predictions)
-
     return {
         "bleu": bleu,
-        "rouge1": rouge1 / n,
-        "rouge2": rouge2 / n,
         "rougeL": rougeL / n,
-        "codebleu": codebleu,   # ← new metric appears automatically in MLflow
+        "bertscore_f1": bertscore_f1,
+        "my_metric": ...,   # appears automatically in MLflow
     }
 ```

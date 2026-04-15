@@ -2,7 +2,7 @@
 
 from rank_bm25 import BM25Okapi
 
-from ..data import load_samples
+from ..data import SAME_PROJECT_DIR, iter_same_project_samples, load_samples
 from .base import BaseRetriever
 
 
@@ -14,22 +14,29 @@ class BM25Retriever(BaseRetriever):
         self._samples: dict[str, list[dict]] = {}
         self._index: dict[str, BM25Okapi] = {}
 
-    def _ensure_index(self, language: str) -> None:
-        if language not in self._index:
-            samples = load_samples(language, split="train")
-            self._samples[language] = samples
-            self._index[language] = BM25Okapi([s["code_tokens"] for s in samples])
+    def _ensure_index(self, key: str, samples: list[dict]) -> None:
+        if key not in self._index:
+            self._samples[key] = samples
+            self._index[key] = BM25Okapi([s["code_tokens"] for s in samples])
 
     def retrieve(self, code: str, language: str, n: int | None = None, project: str | None = None, path: str | None = None) -> list[dict]:
-        self._ensure_index(language)
+        # Use per-project index for same-project dataset; fall back to language-wide index.
+        if project is not None and (SAME_PROJECT_DIR / project).is_dir():
+            key = f"same_project:{project}"
+            if key not in self._index:
+                self._ensure_index(key, list(iter_same_project_samples(project, split="train")))
+        else:
+            key = language
+            if key not in self._index:
+                self._ensure_index(key, load_samples(language, split="train"))
+
         k = n or self.n
         query = code.split()
-        scores = self._index[language].get_scores(query)
-        samples = self._samples[language]
-
+        scores = self._index[key].get_scores(query)
+        samples = self._samples[key]
         ranked = sorted(range(len(samples)), key=lambda i: scores[i], reverse=True)
 
-        if project is not None:
+        if project is not None and key == language:
             ranked = [i for i in ranked if samples[i]["repo"] == project]
 
         return [samples[i] for i in ranked[:k]]

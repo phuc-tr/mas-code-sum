@@ -6,6 +6,7 @@ import re
 from abc import ABC, abstractmethod
 
 from openai import AsyncOpenAI, OpenAI
+from tqdm.asyncio import tqdm as atqdm
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 _LLM_TIMEOUT = 60.0
@@ -77,10 +78,10 @@ class BaseSummarizer(ABC):
                 async with sem:
                     return await self.async_summarize(code, lang, project=proj, path=path, url=url)
 
-            return await asyncio.gather(*[
+            return await atqdm.gather(*[
                 _one(code, lang, proj, path, url)
                 for code, lang, proj, path, url in zip(codes, languages, projects, paths, urls)
-            ])
+            ], desc="samples")
 
         return list(asyncio.run(_gather()))
 

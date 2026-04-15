@@ -4,7 +4,7 @@ from .base import BaseSummarizer, make_openai_clients, strip_code_fences
 EXAMPLE_TEMPLATE = """\
 Code:
 {code}
-Summary: {docstring}"""
+Summary: <s>{docstring}</s>"""
 
 FINAL_TEMPLATE = """\
 Here are some examples of code summarization from the same project:
@@ -15,7 +15,7 @@ Now summarize the following code in one sentence. Output only the summary, no ex
 
 Code:
 {code}
-Summary:"""
+Summary: <s>"""
 
 
 class FewShotLLMSummarizer(BaseSummarizer):
@@ -36,13 +36,16 @@ class FewShotLLMSummarizer(BaseSummarizer):
             for s in examples
         ]
         prompt = FINAL_TEMPLATE.format(examples="\n\n".join(example_blocks), code=code)
-        response = await self._async_client.chat.completions.create(
+        response = await self._async_client.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
+            prompt=prompt,
             max_tokens=128,
             temperature=0.0,
         )
-        return strip_code_fences(response.choices[0].message.content)
+        raw = response.choices[0].text or ""
+        end = raw.find("</s>")
+        comment = raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
+        return strip_code_fences(comment)
 
     def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
@@ -54,13 +57,16 @@ class FewShotLLMSummarizer(BaseSummarizer):
             examples="\n\n".join(example_blocks),
             code=code,
         )
-        response = self._client.chat.completions.create(
+        response = self._client.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
+            prompt=prompt,
             max_tokens=128,
             temperature=0.0,
         )
-        return strip_code_fences(response.choices[0].message.content)
+        raw = response.choices[0].text or ""
+        end = raw.find("</s>")
+        comment = raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
+        return strip_code_fences(comment)
 
     def params(self) -> dict:
         return {"model": self.model, "retriever": type(self.retriever).__name__, "n_shots": self.retriever.n}

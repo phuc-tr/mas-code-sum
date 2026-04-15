@@ -15,16 +15,18 @@ mlflow.openai.autolog()
 
 EXPERIMENT_NAME = "code-summarization"
 
-from .data import load_projects
+from .data import load_projects, load_same_project_projects
 from .metrics import compute_metrics
 from .methods.base import BaseSummarizer
 
 
 def run_experiment(
     method: BaseSummarizer,
-    languages: list[str],
+    languages: list[str] | None = None,
     max_samples: int | None = None,
     num_runs: int = 1,
+    dataset: str = "standard",
+    projects: list[str] | None = None,
 ) -> None:
     """
     Run a summarization experiment across all projects found in the given languages.
@@ -36,11 +38,23 @@ def run_experiment(
 
     Each sample is summarized `num_runs` times and metrics are averaged across
     runs to reduce variance from stochastic generation.
+
+    Args:
+        dataset: "standard" (language-based) or "same-project"
     """
+    if dataset not in ("standard", "same-project"):
+        raise ValueError(f"Unknown dataset '{dataset}'. Must be 'standard' or 'same-project'.")
+    if dataset == "standard" and not languages:
+        raise ValueError("'languages' is required when dataset='standard'.")
+
     mlflow.set_experiment(EXPERIMENT_NAME)
 
-    print(f"Loading projects for languages: {languages}...")
-    projects = load_projects(languages, max_samples_per_project=max_samples)
+    if dataset == "same-project":
+        print("Loading Same-project dataset...")
+        projects = load_same_project_projects(max_samples_per_project=max_samples, projects=projects)
+    else:
+        print(f"Loading projects for languages: {languages}...")
+        projects = load_projects(languages, max_samples_per_project=max_samples)
     print(f"Found {len(projects)} projects.")
 
     # artifact rows: (sample, run_idx, prediction, reference)
@@ -54,12 +68,14 @@ def run_experiment(
     with mlflow.start_run(run_name=method.name):
         mlflow.log_params({
             "method": method.name,
-            "languages": str(languages),
+            "dataset": dataset,
+            "languages": str(languages) if dataset == "standard" else "n/a",
             "max_samples_per_project": max_samples or "all",
             "num_runs": num_runs,
             **method.params(),
         })
         mlflow.set_tag("method", method.name)
+        mlflow.set_tag("dataset", dataset)
 
         for project, samples in projects.items():
             references = [" ".join(s["docstring_tokens"]) for s in samples]

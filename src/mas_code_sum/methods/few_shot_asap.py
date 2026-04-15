@@ -33,7 +33,6 @@ from ..enrichers.dfg_loader import get_dfg_loader
 from ..enrichers.identifier_extractor import extract_identifier_context
 from ..retrievers.base import BaseRetriever
 from .base import BaseSummarizer, make_openai_clients, strip_code_fences
-from .zero_shot_context_enriched import _get_metadata_index
 
 _COMMENT_PROMPT = "Write down the original comment written by the developer."
 _NO_DFG = "Please find the dataflow of the function. We present the source and list of target indices.\nNo DFG available"
@@ -77,9 +76,9 @@ def _build_block(
 
     parts.append(_COMMENT_PROMPT)
     if docstring is not None:
-        parts.append(f"Comment: {docstring}")
+        parts.append(f"Comment: <s>{docstring}</s>")
     else:
-        parts.append("Comment:")
+        parts.append("Comment: <s>")
     return "\n".join(parts)
 
 
@@ -121,9 +120,7 @@ class FewShotAsapSummarizer(BaseSummarizer):
 
         repo_ctx: str | None = None
         if self.use_repo and project:
-            meta = _get_metadata_index().get(project, {})
-            about = meta.get("about") or "N/A"
-            repo_ctx = f"Repository: {project}\nDescription: {about}\nFile: {path or 'unknown'}"
+            repo_ctx = f"Repository: {project}\nFile: {path or 'unknown'}"
 
         dfg_loader = get_dfg_loader() if self.use_dfg else None
 
@@ -145,14 +142,16 @@ class FewShotAsapSummarizer(BaseSummarizer):
         blocks.append(_build_block(code, language, None, repo_ctx, query_dfg, docstring=None, dfg_before_id3=True))
 
         prompt = "\n\n".join(blocks)
-        response = await self._async_client.chat.completions.create(
+        response = await self._async_client.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=128,
+            prompt=prompt,
+            max_tokens=30,
             temperature=0.0,
         )
-        raw = response.choices[0].message.content or ""
-        return strip_code_fences(raw.split("\n")[0].strip())
+        raw = response.choices[0].text or ""
+        end = raw.find("</s>")
+        comment = raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
+        return strip_code_fences(comment)
 
     def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
@@ -160,9 +159,7 @@ class FewShotAsapSummarizer(BaseSummarizer):
         # Repo context (same block for all examples and the query)
         repo_ctx: str | None = None
         if self.use_repo and project:
-            meta = _get_metadata_index().get(project, {})
-            about = meta.get("about") or "N/A"
-            repo_ctx = f"Repository: {project}\nDescription: {about}\nFile: {path or 'unknown'}"
+            repo_ctx = f"Repository: {project}\nFile: {path or 'unknown'}"
 
         # DFG loader (only accessed if use_dfg=True)
         dfg_loader = get_dfg_loader() if self.use_dfg else None
@@ -190,16 +187,16 @@ class FewShotAsapSummarizer(BaseSummarizer):
 
         prompt = "\n\n".join(blocks)
 
-        response = self._client.chat.completions.create(
+        response = self._client.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
+            prompt=prompt,
             max_tokens=128,
             temperature=0.0,
         )
-        raw = response.choices[0].message.content or ""
-
-        first_line = raw.split("\n")[0].strip()
-        return strip_code_fences(first_line)
+        raw = response.choices[0].text or ""
+        end = raw.find("</s>")
+        comment = raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
+        return strip_code_fences(comment)
 
     def params(self) -> dict:
         return {

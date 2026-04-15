@@ -34,9 +34,11 @@ def main(config_path: str) -> None:
 
     run_experiment(
         method=method,
-        languages=cfg["languages"],
+        languages=cfg.get("languages"),
         max_samples=cfg.get("max_samples"),
         num_runs=cfg.get("num_runs", 1),
+        dataset=cfg.get("dataset", "standard"),
+        projects=cfg.get("projects"),
     )
 
 

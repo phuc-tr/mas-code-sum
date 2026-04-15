@@ -5,11 +5,11 @@ method_params:
 
 retriever: bm25
 retriever_params:
-  n: 5
+  n: 10
 
 languages:
   - python
   - java
 
 max_samples: null
-num_runs: 3
+num_runs: 1

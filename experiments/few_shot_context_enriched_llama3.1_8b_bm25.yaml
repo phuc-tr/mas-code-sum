@@ -17,4 +17,4 @@ languages:
 
 split: test
 max_samples: null
-num_runs: 3
+num_runs: 1

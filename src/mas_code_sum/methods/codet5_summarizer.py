@@ -11,13 +11,13 @@ class CodeT5Summarizer(BaseSummarizer):
     name = "codet5"
 
     def __init__(self, max_length: int = 20, batch_size: int = 32):
-        from transformers import AutoTokenizer, T5ForConditionalGeneration
+        from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
         import torch
 
         self.max_length = max_length
         self.batch_size = batch_size
         self._tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        self._model = T5ForConditionalGeneration.from_pretrained(MODEL_NAME)
+        self._model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._model.to(self._device)
         self._model.eval()
@@ -28,7 +28,10 @@ class CodeT5Summarizer(BaseSummarizer):
         results = []
         for i in range(0, len(codes), self.batch_size):
             batch = codes[i : i + self.batch_size]
-            inputs = self._tokenizer(batch, return_tensors="pt", padding=True, truncation=True)
+            inputs = self._tokenizer(batch, return_tensors="pt", 
+                                     padding=True, 
+                                     truncation=True
+                                     )
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
             with torch.no_grad():
                 generated_ids = self._model.generate(**inputs, max_length=self.max_length)
