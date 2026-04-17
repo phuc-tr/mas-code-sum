@@ -1,0 +1,19 @@
+method: few_shot_file_context
+
+method_params:
+  model: meta-llama/llama-3.1-8b-instruct
+  use_module_doc: true
+  use_class_context: true
+  max_imports: 0   # set to 0 to disable imports entirely
+
+retriever: bm25
+retriever_params:
+  n: 5
+
+languages:
+  - python
+  - java
+
+split: test
+max_samples: null
+num_runs: 1
