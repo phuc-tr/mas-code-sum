@@ -1,0 +1,12 @@
+method: codet5
+
+method_params:
+  max_length: 512
+
+dataset: same-project
+projects:
+  - jain-slee
+  - geopackage-android
+
+split: test
+max_samples: 10

@@ -1,0 +1,10 @@
+# Experiment configuration using the Same-project dataset
+# Run with: python run_experiment.py experiments/example_same_project.yaml
+
+method: exact_copy
+
+dataset: same-project           # use dataset/Same-project/ instead of language-based dataset
+
+split: test
+max_samples: 100                # max samples per project; set to null for all
+num_runs: 1

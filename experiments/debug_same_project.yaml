@@ -1,0 +1,8 @@
+method: exact_copy
+
+dataset: same-project
+projects:
+  - geopackage-android
+
+max_samples: 10
+num_runs: 1

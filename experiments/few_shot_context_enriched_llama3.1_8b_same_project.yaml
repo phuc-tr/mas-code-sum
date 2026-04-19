@@ -1,0 +1,17 @@
+method: few_shot_context_enriched
+
+method_params:
+  model: meta-llama/llama-3.1-8b-instruct
+
+retriever: bm25
+retriever_params:
+  n: 10
+
+dataset: same-project
+projects:
+  - jain-slee
+  - geopackage-android
+
+split: test
+max_samples: null
+num_runs: 1
