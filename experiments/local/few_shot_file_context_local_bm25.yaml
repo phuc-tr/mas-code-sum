@@ -1,7 +1,7 @@
 method: few_shot_file_context
 
 method_params:
-  model: meta-llama/Llama-3.1-8B-Instruct   # HuggingFace model ID
+  model: meta-llama/Llama-3.1-8B
   backend: local
   device: cuda
   use_module_doc: true
@@ -10,7 +10,7 @@ method_params:
 
 retriever: bm25
 retriever_params:
-  n: 5
+  n: 10
 
 languages:
   - python
