@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import BaseSummarizer, make_local_clients, make_openai_clients, strip_code_fences
 
 METADATA_PATH = Path(__file__).parents[3] / "dataset" / "repo_metadata" / "all_repo_metadata.json"
 
@@ -54,10 +54,14 @@ class ZeroShotContextEnrichedSummarizer(BaseSummarizer):
 
     name = "zero_shot_context_enriched"
 
-    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", max_concurrency: int = 10):
+    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", max_concurrency: int = 10, backend: str = "openrouter", device: str = "cuda"):
         self.model = model
         self.max_concurrency = max_concurrency
-        self._client, self._async_client = make_openai_clients()
+        self.backend = backend
+        if backend == "local":
+            self._client, self._async_client = make_local_clients(model, device)
+        else:
+            self._client, self._async_client = make_openai_clients()
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         if project:
@@ -94,4 +98,4 @@ class ZeroShotContextEnrichedSummarizer(BaseSummarizer):
         return strip_code_fences(response.choices[0].message.content)
 
     def params(self) -> dict:
-        return {"model": self.model}
+        return {"model": self.model, "backend": self.backend}

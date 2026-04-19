@@ -1,0 +1,21 @@
+method: few_shot_file_context
+
+method_params:
+  model: meta-llama/Llama-3.1-8B-Instruct   # HuggingFace model ID
+  backend: local
+  device: cuda
+  use_module_doc: true
+  use_class_context: true
+  max_imports: 0
+
+retriever: bm25
+retriever_params:
+  n: 5
+
+languages:
+  - python
+  - java
+
+split: test
+max_samples: null
+num_runs: 1

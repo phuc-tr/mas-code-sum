@@ -1,7 +1,7 @@
 """Few-shot summarizer with a critic agent that refines the initial summary."""
 
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import BaseSummarizer, make_local_clients, make_openai_clients, strip_code_fences
 from .zero_shot_context_enriched import _get_metadata_index
 
 EXAMPLE_TEMPLATE = """\
@@ -62,11 +62,17 @@ class FewShotCriticSummarizer(BaseSummarizer):
         model: str = "meta-llama/llama-3.1-8b-instruct",
         critic_model: str | None = None,
         retriever: BaseRetriever = None,
+        backend: str = "openrouter",
+        device: str = "cuda",
     ):
         self.model = model
         self.critic_model = critic_model or model
         self.retriever = retriever
-        self._client, _ = make_openai_clients()
+        self.backend = backend
+        if backend == "local":
+            self._client, _ = make_local_clients(model, device)
+        else:
+            self._client, _ = make_openai_clients()
 
     def summarize(self, code: str, language: str, project: str, path: str, url: str | None = None) -> str:
         ctx = _get_metadata_index()[project]
@@ -113,6 +119,7 @@ class FewShotCriticSummarizer(BaseSummarizer):
     def params(self) -> dict:
         return {
             "model": self.model,
+            "backend": self.backend,
             "critic_model": self.critic_model,
             "retriever": type(self.retriever).__name__,
             "n_shots": self.retriever.n,

@@ -24,6 +24,119 @@ def make_openai_clients() -> tuple[OpenAI, AsyncOpenAI]:
     return OpenAI(**kwargs), AsyncOpenAI(**kwargs)
 
 
+# ---------------------------------------------------------------------------
+# Local HuggingFace backend — thin wrappers that mimic the OpenAI client API
+# ---------------------------------------------------------------------------
+
+class _LocalTextResponse:
+    """Mimics openai.types.Completion."""
+    def __init__(self, text: str):
+        self.choices = [type("_Choice", (), {"text": text})()]
+
+
+class _LocalChatResponse:
+    """Mimics openai.types.ChatCompletion."""
+    def __init__(self, content: str):
+        msg = type("_Msg", (), {"content": content})()
+        self.choices = [type("_Choice", (), {"message": msg})()]
+
+
+class _LocalSyncCompletions:
+    def __init__(self, pipeline):
+        self._pipeline = pipeline
+
+    def create(self, prompt: str, max_tokens: int = 128, temperature: float = 0.0, **_) -> _LocalTextResponse:
+        do_sample = temperature > 0
+        outputs = self._pipeline(
+            prompt,
+            max_new_tokens=max_tokens,
+            temperature=temperature if do_sample else None,
+            do_sample=do_sample,
+            return_full_text=False,
+        )
+        return _LocalTextResponse(outputs[0]["generated_text"])
+
+
+class _LocalSyncChatCompletions:
+    def __init__(self, pipeline):
+        self._pipeline = pipeline
+
+    def create(self, messages: list[dict], max_tokens: int = 128, temperature: float = 0.0, **_) -> _LocalChatResponse:
+        do_sample = temperature > 0
+        outputs = self._pipeline(
+            messages,
+            max_new_tokens=max_tokens,
+            temperature=temperature if do_sample else None,
+            do_sample=do_sample,
+        )
+        content = outputs[0]["generated_text"][-1]["content"]
+        return _LocalChatResponse(content)
+
+
+class _LocalSyncChat:
+    def __init__(self, pipeline):
+        self.completions = _LocalSyncChatCompletions(pipeline)
+
+
+class _LocalSyncClient:
+    """Sync local client. Has .completions and .chat.completions interfaces."""
+    def __init__(self, pipeline):
+        self.completions = _LocalSyncCompletions(pipeline)
+        self.chat = _LocalSyncChat(pipeline)
+
+
+class _LocalAsyncCompletions:
+    def __init__(self, sync: _LocalSyncCompletions):
+        self._sync = sync
+
+    async def create(self, prompt: str, max_tokens: int = 128, temperature: float = 0.0, **_) -> _LocalTextResponse:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: self._sync.create(prompt, max_tokens=max_tokens, temperature=temperature))
+
+
+class _LocalAsyncChatCompletions:
+    def __init__(self, sync: _LocalSyncChatCompletions):
+        self._sync = sync
+
+    async def create(self, messages: list[dict], max_tokens: int = 128, temperature: float = 0.0, **_) -> _LocalChatResponse:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: self._sync.create(messages, max_tokens=max_tokens, temperature=temperature))
+
+
+class _LocalAsyncChat:
+    def __init__(self, sync_chat: _LocalSyncChat):
+        self.completions = _LocalAsyncChatCompletions(sync_chat.completions)
+
+
+class _LocalAsyncClient:
+    """Async local client. Has .completions and .chat.completions interfaces."""
+    def __init__(self, sync_client: _LocalSyncClient):
+        self.completions = _LocalAsyncCompletions(sync_client.completions)
+        self.chat = _LocalAsyncChat(sync_client.chat)
+
+
+def make_local_clients(model_id: str, device: str = "cuda") -> tuple[_LocalSyncClient, _LocalAsyncClient]:
+    """Load a HuggingFace text-generation pipeline and return sync/async local clients.
+
+    The returned clients expose the same .completions.create() and
+    .chat.completions.create() interfaces as the OpenAI client, so methods
+    can be switched to local GPU inference with no other code changes.
+
+    Args:
+        model_id: HuggingFace model ID (e.g. "meta-llama/Llama-3.1-8B-Instruct").
+        device: device_map value passed to the pipeline (e.g. "cuda", "cpu", "auto").
+    """
+    from transformers import pipeline as hf_pipeline  # noqa: PLC0415
+    pipe = hf_pipeline(
+        "text-generation",
+        model=model_id,
+        device_map=device,
+        torch_dtype="auto",
+    )
+    sync = _LocalSyncClient(pipe)
+    return sync, _LocalAsyncClient(sync)
+
+
 def strip_code_fences(text: str) -> str:
     """Remove markdown code fences, triple-quotes, and <think> blocks from LLM output."""
     text = text.strip()

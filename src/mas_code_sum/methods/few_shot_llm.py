@@ -1,18 +1,12 @@
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import BaseSummarizer, make_local_clients, make_openai_clients, strip_code_fences
 
 EXAMPLE_TEMPLATE = """\
 Code:
 {code}
 Summary: <s>{docstring}</s>"""
 
-FINAL_TEMPLATE = """\
-Here are some examples of code summarization from the same project:
-
-{examples}
-
-Now summarize the following code in one sentence. Output only the summary, no explanation:
-
+QUERY_TEMPLATE = """\
 Code:
 {code}
 Summary: <s>"""
@@ -23,11 +17,15 @@ class FewShotLLMSummarizer(BaseSummarizer):
 
     name = "few_shot_llm"
 
-    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", retriever: BaseRetriever = None, max_concurrency: int = 5):
+    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", retriever: BaseRetriever = None, max_concurrency: int = 5, backend: str = "openrouter", device: str = "cuda"):
         self.model = model
         self.retriever = retriever
         self.max_concurrency = max_concurrency
-        self._client, self._async_client = make_openai_clients()
+        self.backend = backend
+        if backend == "local":
+            self._client, self._async_client = make_local_clients(model, device)
+        else:
+            self._client, self._async_client = make_openai_clients()
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
@@ -35,7 +33,7 @@ class FewShotLLMSummarizer(BaseSummarizer):
             EXAMPLE_TEMPLATE.format(code=" ".join(s["code_tokens"]), docstring=" ".join(s["docstring_tokens"]))
             for s in examples
         ]
-        prompt = FINAL_TEMPLATE.format(examples="\n\n".join(example_blocks), code=code)
+        prompt = "\n\n".join(example_blocks) + "\n\n" + QUERY_TEMPLATE.format(code=code)
         response = await self._async_client.completions.create(
             model=self.model,
             prompt=prompt,
@@ -53,10 +51,7 @@ class FewShotLLMSummarizer(BaseSummarizer):
             EXAMPLE_TEMPLATE.format(code=" ".join(s["code_tokens"]), docstring=" ".join(s["docstring_tokens"]))
             for s in examples
         ]
-        prompt = FINAL_TEMPLATE.format(
-            examples="\n\n".join(example_blocks),
-            code=code,
-        )
+        prompt = "\n\n".join(example_blocks) + "\n\n" + QUERY_TEMPLATE.format(code=code)
         response = self._client.completions.create(
             model=self.model,
             prompt=prompt,
@@ -69,4 +64,4 @@ class FewShotLLMSummarizer(BaseSummarizer):
         return strip_code_fences(comment)
 
     def params(self) -> dict:
-        return {"model": self.model, "retriever": type(self.retriever).__name__, "n_shots": self.retriever.n}
+        return {"model": self.model, "backend": self.backend, "retriever": type(self.retriever).__name__, "n_shots": self.retriever.n}

@@ -1,0 +1,13 @@
+method: zero_shot_llm
+
+method_params:
+  model: meta-llama/Llama-3.1-8B-Instruct   # HuggingFace model ID
+  backend: local
+  device: cuda                               # or "cpu" / "auto"
+
+languages:
+  - python
+  - java
+
+max_samples: null
+num_runs: 1

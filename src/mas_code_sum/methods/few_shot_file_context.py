@@ -34,7 +34,7 @@ Query block (Python only):
 
 from ..enrichers.file_context import extract_file_context, render_file_context
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import BaseSummarizer, make_local_clients, make_openai_clients, strip_code_fences
 from .few_shot_context_enriched import _build_block
 from .zero_shot_context_enriched import _get_metadata_index
 
@@ -52,6 +52,8 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         use_module_doc: bool = True,
         use_class_context: bool = True,
         max_imports: int = 25,
+        backend: str = "openrouter",
+        device: str = "cuda",
     ):
         self.model = model
         self.retriever = retriever
@@ -59,8 +61,12 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         self.use_module_doc = use_module_doc
         self.use_class_context = use_class_context
         self.max_imports = max_imports  # 0 disables imports entirely
+        self.backend = backend
         self.max_concurrency = 10
-        self._client, self._async_client = make_openai_clients()
+        if backend == "local":
+            self._client, self._async_client = make_local_clients(model, device)
+        else:
+            self._client, self._async_client = make_openai_clients()
 
     def _example_block(self, s: dict) -> str:
         code = " ".join(s["code_tokens"])
@@ -144,6 +150,7 @@ class FewShotFileContextSummarizer(BaseSummarizer):
     def params(self) -> dict:
         return {
             "model": self.model,
+            "backend": self.backend,
             "retriever": type(self.retriever).__name__,
             "n_shots": self.retriever.n,
             "example_paths": self.example_paths,

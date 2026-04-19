@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..retrievers.base import BaseRetriever
 from ..style_guide import build_style_guide
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import BaseSummarizer, make_local_clients, make_openai_clients, strip_code_fences
 from .zero_shot_context_enriched import _get_metadata_index
 
 _EXAMPLE_TEMPLATE = """\
@@ -51,12 +51,18 @@ class StyleGuidedSummarizer(BaseSummarizer):
         style_model: str | None = None,
         retriever: BaseRetriever | None = None,
         n_style_samples: int = 20,
+        backend: str = "openrouter",
+        device: str = "cuda",
     ):
         self.model = model
         self.style_model = style_model or model
         self.retriever = retriever
         self.n_style_samples = n_style_samples
-        self._client, _ = make_openai_clients()
+        self.backend = backend
+        if backend == "local":
+            self._client, _ = make_local_clients(model, device)
+        else:
+            self._client, _ = make_openai_clients()
         self._style_cache: dict[tuple[str, str], str] = {}
 
     def _get_style_guide(self, project: str, language: str) -> str:
@@ -67,6 +73,7 @@ class StyleGuidedSummarizer(BaseSummarizer):
                 language=language,
                 model=self.style_model,
                 n_samples=self.n_style_samples,
+                client=self._client,
             )
         return self._style_cache[key]
 
@@ -111,6 +118,7 @@ class StyleGuidedSummarizer(BaseSummarizer):
     def params(self) -> dict:
         return {
             "model": self.model,
+            "backend": self.backend,
             "style_model": self.style_model,
             "retriever": type(self.retriever).__name__,
             "n_shots": self.retriever.n,

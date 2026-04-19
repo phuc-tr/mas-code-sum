@@ -34,10 +34,14 @@ def build_style_guide(
     model: str = "meta-llama/llama-3.1-8b-instruct",
     n_samples: int = 50,
     seed: int = 42,
+    client=None,
 ) -> str:
     """Return a natural-language style guide derived from the project's training docstrings.
 
     Results are cached to disk so the LLM call only happens once per project/language/model.
+
+    Args:
+        client: Optional pre-built client (OpenAI or local). If None, creates an OpenRouter client.
     """
     cache_key = f"{project.replace('/', '_')}__{language}__{model.replace('/', '_')}.txt"
     cache_path = CACHE_DIR / cache_key
@@ -57,7 +61,8 @@ def build_style_guide(
         docstrings=docstrings_str,
     )
 
-    client = OpenAI(api_key=os.environ["OPENROUTER_API_KEY"], base_url=OPENROUTER_BASE_URL)
+    if client is None:
+        client = OpenAI(api_key=os.environ["OPENROUTER_API_KEY"], base_url=OPENROUTER_BASE_URL)
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],

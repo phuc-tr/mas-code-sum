@@ -32,7 +32,7 @@ from __future__ import annotations
 from ..enrichers.dfg_loader import get_dfg_loader
 from ..enrichers.identifier_extractor import extract_identifier_context
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import BaseSummarizer, make_local_clients, make_openai_clients, strip_code_fences
 
 _COMMENT_PROMPT = "Write down the original comment written by the developer."
 _NO_DFG = "Please find the dataflow of the function. We present the source and list of target indices.\nNo DFG available"
@@ -107,13 +107,19 @@ class FewShotAsapSummarizer(BaseSummarizer):
         retriever: BaseRetriever | None = None,
         use_repo: bool = True,
         use_dfg: bool = False,
+        backend: str = "openrouter",
+        device: str = "cuda",
     ):
         self.model = model
         self.retriever = retriever
         self.use_repo = use_repo
         self.use_dfg = use_dfg
+        self.backend = backend
         self.max_concurrency = 10
-        self._client, self._async_client = make_openai_clients()
+        if backend == "local":
+            self._client, self._async_client = make_local_clients(model, device)
+        else:
+            self._client, self._async_client = make_openai_clients()
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
@@ -201,6 +207,7 @@ class FewShotAsapSummarizer(BaseSummarizer):
     def params(self) -> dict:
         return {
             "model": self.model,
+            "backend": self.backend,
             "retriever": type(self.retriever).__name__,
             "n_shots": self.retriever.n,
             "use_repo": self.use_repo,
