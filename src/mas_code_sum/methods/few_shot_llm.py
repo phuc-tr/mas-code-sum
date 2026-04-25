@@ -1,5 +1,5 @@
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import BaseSummarizer, make_clients, strip_code_fences
 
 EXAMPLE_TEMPLATE = """\
 Code:
@@ -23,11 +23,12 @@ class FewShotLLMSummarizer(BaseSummarizer):
 
     name = "few_shot_llm"
 
-    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", retriever: BaseRetriever = None, max_concurrency: int = 5):
+    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", retriever: BaseRetriever = None, max_concurrency: int = 2, backend: str = "featherless"):
         self.model = model
         self.retriever = retriever
         self.max_concurrency = max_concurrency
-        self._client, self._async_client = make_openai_clients()
+        self.backend = backend
+        self._client, self._async_client = make_clients(backend)
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
@@ -69,4 +70,4 @@ class FewShotLLMSummarizer(BaseSummarizer):
         return strip_code_fences(comment)
 
     def params(self) -> dict:
-        return {"model": self.model, "retriever": type(self.retriever).__name__, "n_shots": self.retriever.n}
+        return {"model": self.model, "retriever": type(self.retriever).__name__, "n_shots": self.retriever.n, "backend": self.backend}

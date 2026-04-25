@@ -1,6 +1,7 @@
 """Experiment runner with MLflow tracking."""
 
 import csv
+import inspect
 import io
 import os
 import tempfile
@@ -58,12 +59,14 @@ def run_experiment(
     print(f"Found {len(projects)} projects.")
 
     # artifact rows: (sample, run_idx, prediction, reference)
-    artifact_rows: list[tuple[dict, int, str, str]] = []
+    artifact_rows: list[tuple[dict, int, str, str, str | None, str | None, str | None]] = []
 
     all_samples: list[dict] = []
     all_references: list[str] = []
     # per-sample predictions accumulated across runs: index -> list[str]
     all_predictions_by_run: list[list[str]] = []
+
+    _batch_supports_gt = "ground_truths" in inspect.signature(method.summarize_batch).parameters
 
     with mlflow.start_run(run_name=method.name):
         mlflow.log_params({
@@ -87,16 +90,28 @@ def run_experiment(
             # Collect predictions across all runs for this project
             project_run_predictions: list[list[str]] = []
             for run_idx in range(num_runs):
-                preds = method.summarize_batch(
+                batch_kwargs = dict(
                     codes=codes,
                     languages=langs,
                     projects=[project] * len(samples),
                     paths=paths,
                     urls=urls,
                 )
+                if _batch_supports_gt:
+                    batch_kwargs["ground_truths"] = references
+                preds = method.summarize_batch(**batch_kwargs)
+                sources = getattr(method, "last_sources", None)
+                initials = getattr(method, "last_initials", None)
+                refineds = getattr(method, "last_refineds", None)
                 project_run_predictions.append(preds)
-                for sample, pred, ref in zip(samples, preds, references):
-                    artifact_rows.append((sample, run_idx, pred, ref))
+                for i, (sample, pred, ref) in enumerate(zip(samples, preds, references)):
+                    source = sources[i] if sources else None
+                    initial = initials[i] if initials else None
+                    refined = refineds[i] if refineds else None
+                    artifact_rows.append((sample, run_idx, pred, ref, source, initial, refined))
+                if sources:
+                    win_rate = sources.count("critic") / len(sources)
+                    mlflow.log_metric(f"{project}/critic_win_rate", win_rate, step=run_idx)
 
             # Average metrics across runs
             run_metrics = [
@@ -129,13 +144,23 @@ def run_experiment(
         _log_predictions_artifact(artifact_rows)
 
 
-def _log_predictions_artifact(rows: list[tuple[dict, int, str, str]]) -> None:
-    """Write a CSV of (id, project, func_name, run, reference, prediction) and log as MLflow artifact."""
+def _log_predictions_artifact(rows: list[tuple[dict, int, str, str, str | None, str | None, str | None]]) -> None:
+    """Write a CSV of (id, project, func_name, run, reference, initial_summary, critic_summary, prediction, from_critic) and log as MLflow artifact."""
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=["id", "project", "func_name", "run", "reference", "prediction"])
+    writer = csv.DictWriter(buf, fieldnames=["id", "project", "func_name", "run", "reference", "initial_summary", "critic_summary", "prediction", "from_critic"])
     writer.writeheader()
-    for sample, run_idx, pred, ref in rows:
-        writer.writerow({"id": sample["id"], "project": sample["repo"], "func_name": sample["func_name"], "run": run_idx, "reference": ref, "prediction": pred})
+    for sample, run_idx, pred, ref, source, initial, refined in rows:
+        writer.writerow({
+            "id": sample["id"],
+            "project": sample["repo"],
+            "func_name": sample["func_name"],
+            "run": run_idx,
+            "reference": ref,
+            "initial_summary": initial if initial is not None else "",
+            "critic_summary": refined if refined is not None else "",
+            "prediction": pred,
+            "from_critic": source if source is not None else "",
+        })
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         f.write(buf.getvalue())

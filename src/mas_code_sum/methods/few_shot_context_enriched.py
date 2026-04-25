@@ -20,7 +20,7 @@ Then for the query:
 """
 
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import BaseSummarizer, make_clients, strip_code_fences
 from .zero_shot_context_enriched import _get_metadata_index
 
 
@@ -56,12 +56,14 @@ class FewShotContextEnrichedSummarizer(BaseSummarizer):
         model: str = "meta-llama/llama-3.1-8b-instruct",
         retriever: BaseRetriever = None,
         example_paths: bool = False,
+        backend: str = "featherless",
     ):
         self.model = model
         self.retriever = retriever
         self.example_paths = example_paths
+        self.backend = backend
         self.max_concurrency = 10
-        self._client, self._async_client = make_openai_clients()
+        self._client, self._async_client = make_clients(backend)
 
     def _example_block(self, s: dict) -> str:
         code = " ".join(s["code_tokens"])
@@ -119,4 +121,5 @@ class FewShotContextEnrichedSummarizer(BaseSummarizer):
             "retriever": type(self.retriever).__name__,
             "n_shots": self.retriever.n,
             "example_paths": self.example_paths,
+            "backend": self.backend,
         }

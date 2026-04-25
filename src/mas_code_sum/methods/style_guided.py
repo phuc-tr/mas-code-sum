@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..retrievers.base import BaseRetriever
 from ..style_guide import build_style_guide
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import BaseSummarizer, make_clients, strip_code_fences
 from .zero_shot_context_enriched import _get_metadata_index
 
 _EXAMPLE_TEMPLATE = """\
@@ -51,12 +51,14 @@ class StyleGuidedSummarizer(BaseSummarizer):
         style_model: str | None = None,
         retriever: BaseRetriever | None = None,
         n_style_samples: int = 20,
+        backend: str = "featherless",
     ):
         self.model = model
         self.style_model = style_model or model
         self.retriever = retriever
         self.n_style_samples = n_style_samples
-        self._client, _ = make_openai_clients()
+        self.backend = backend
+        self._client, _ = make_clients(backend)
         self._style_cache: dict[tuple[str, str], str] = {}
 
     def _get_style_guide(self, project: str, language: str) -> str:

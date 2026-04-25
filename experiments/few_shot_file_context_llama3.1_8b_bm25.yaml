@@ -1,14 +1,15 @@
 method: few_shot_file_context
 
 method_params:
-  model: meta-llama/llama-3.1-8b-instruct
-  use_module_doc: true
+  model: meta-llama/Meta-Llama-3.1-8B
+  backend: featherless
+  use_outer_context: true
   use_class_context: true
   max_imports: 0   # set to 0 to disable imports entirely
 
 retriever: bm25
 retriever_params:
-  n: 5
+  n: 10
 
 languages:
   - python

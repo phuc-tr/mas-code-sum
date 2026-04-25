@@ -1,20 +1,43 @@
 """Abstract base class for summarization methods."""
 
 import asyncio
+import logging
 import os
 import re
 from abc import ABC, abstractmethod
 
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI, OpenAI, RateLimitError
 from tqdm.asyncio import tqdm as atqdm
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+FEATHERLESS_BASE_URL = "https://api.featherless.ai/v1"
 _LLM_TIMEOUT = 60.0
 _LLM_MAX_RETRIES = 3
 
+_RATE_LIMIT_INITIAL_WAIT = 5.0
+_RATE_LIMIT_MAX_RETRIES = 6
+
+
+async def _call_with_rate_limit_retry(coro_factory):
+    """Call *coro_factory* and await the result, retrying on RateLimitError."""
+    wait = _RATE_LIMIT_INITIAL_WAIT
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            return await coro_factory()
+        except RateLimitError:
+            if attempt == _RATE_LIMIT_MAX_RETRIES:
+                raise
+            logging.warning("Rate limited; retrying in %.0fs (attempt %d/%d)", wait, attempt + 1, _RATE_LIMIT_MAX_RETRIES)
+            await asyncio.sleep(wait)
+            wait = min(wait * 2, 300)
+
+def extract_summary(raw: str) -> str:
+    end = raw.find("</s>")
+    return raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
+
 
 def make_openai_clients() -> tuple[OpenAI, AsyncOpenAI]:
-    """Create sync and async OpenAI clients pointed at OpenRouter with shared timeout/retry config."""
+    """Create sync and async OpenAI clients pointed at OpenRouter."""
     kwargs = dict(
         api_key=os.environ["OPENROUTER_API_KEY"],
         base_url=OPENROUTER_BASE_URL,
@@ -22,6 +45,26 @@ def make_openai_clients() -> tuple[OpenAI, AsyncOpenAI]:
         max_retries=_LLM_MAX_RETRIES,
     )
     return OpenAI(**kwargs), AsyncOpenAI(**kwargs)
+
+
+def make_featherless_clients() -> tuple[OpenAI, AsyncOpenAI]:
+    """Create sync and async OpenAI clients pointed at Featherless API."""
+    kwargs = dict(
+        api_key=os.environ["FEATHERLESS_API_KEY"],
+        base_url=FEATHERLESS_BASE_URL,
+        timeout=_LLM_TIMEOUT,
+        max_retries=_LLM_MAX_RETRIES,
+    )
+    return OpenAI(**kwargs), AsyncOpenAI(**kwargs)
+
+
+def make_clients(backend: str = "featherless"):
+    """Return OpenAI-compatible clients for the specified backend."""
+    if backend == "openrouter":
+        return make_openai_clients()
+    if backend == "featherless":
+        return make_featherless_clients()
+    raise ValueError(f"Unknown backend: {backend!r}. Choose 'openrouter' or 'featherless'.")
 
 
 def strip_code_fences(text: str) -> str:
@@ -76,7 +119,9 @@ class BaseSummarizer(ABC):
 
             async def _one(code, lang, proj, path, url):
                 async with sem:
-                    return await self.async_summarize(code, lang, project=proj, path=path, url=url)
+                    return await _call_with_rate_limit_retry(
+                        lambda: self.async_summarize(code, lang, project=proj, path=path, url=url)
+                    )
 
             return await atqdm.gather(*[
                 _one(code, lang, proj, path, url)

@@ -1,14 +1,23 @@
 """Extract file-level context (module docstring, enclosing class, imports) for Python files.
 
 Given a dataset row's repo and path, loads the source file from `dataset/repos/`
-and pulls signals that help the LLM summarize a target function:
+and pulls signals that help the LLM summarize a target function.
 
-- module_doc: top-of-file docstring (stripped)
-- class_name / class_doc: the enclosing class's name and docstring, if the
-  target function is a method
-- imports: top-level `import` / `from ... import ...` statements, as source text
+Language-specific signals
+-------------------------
+Python:
+  - module_doc: top-of-file docstring (stripped)
+  - class_name / class_doc: enclosing class name and docstring (if method)
+  - imports: top-level import statements
 
-Python only for v1. Callers should gate on language before invoking.
+Java (delegated to file_context_java.py):
+  - class_name / class_doc: enclosing class name and Javadoc
+  - outer_class_name / outer_class_doc: top-level class name and Javadoc,
+    only set when the method lives in a nested/inner class (differs from enclosing)
+  - imports: top-level import statements
+  - module_doc is always None (Java has no file-level docstring)
+
+There is intentionally no forced common mapping between languages.
 """
 
 from __future__ import annotations
@@ -27,13 +36,23 @@ REPOS_ROOT = Path(__file__).parents[3] / "dataset" / "repos"
 
 @dataclass
 class FileContext:
+    language: str  # "python" | "java"
+    # Python only: top-of-file docstring. Always None for Java.
     module_doc: str | None
+    # Direct enclosing class of the target function (Python and Java).
     class_name: str | None
     class_doc: str | None
+    # Java only: the top-level class, set only when the method lives in a
+    # nested/inner class (i.e. outer_class_name != class_name). Always None for Python.
+    outer_class_name: str | None
+    outer_class_doc: str | None
     imports: list[str]
 
     def is_empty(self) -> bool:
-        return not (self.module_doc or self.class_name or self.imports)
+        if self.language == "python":
+            return not (self.module_doc or self.class_name or self.imports)
+        else:
+            return not (self.class_name or self.outer_class_name or self.imports)
 
 
 def _repo_dir(repo: str) -> Path:
@@ -142,7 +161,7 @@ def extract_file_context(
 
     parsed = _parse(repo, path)
     if parsed is None:
-        return FileContext(module_doc=None, class_name=None, class_doc=None, imports=[])
+        return FileContext(language="python", module_doc=None, class_name=None, class_doc=None, outer_class_name=None, outer_class_doc=None, imports=[])
     tree, src = parsed
 
     module_doc = ast.get_docstring(tree)
@@ -163,9 +182,12 @@ def extract_file_context(
     imports = _collect_imports(tree, src, max_imports=max_imports)
 
     return FileContext(
+        language="python",
         module_doc=module_doc.strip() if module_doc else None,
         class_name=class_name,
         class_doc=class_doc.strip() if class_doc else None,
+        outer_class_name=None,
+        outer_class_doc=None,
         imports=imports,
     )
 
@@ -175,23 +197,137 @@ def render_file_context(
     max_module_doc_chars: int = 400,
     max_class_doc_chars: int = 300,
 ) -> str:
-    """Render a FileContext as a compact block for prompt inclusion. Empty -> ''."""
+    """Render a FileContext as a compact block for prompt inclusion. Empty -> ''.
+
+    Labels are language-specific:
+      Python: "Module docstring:", "Enclosing class:"
+      Java:   "Top-level class:" (outer, nested case only), "Class:" / "Enclosing class:"
+    """
     parts: list[str] = []
-    if ctx.module_doc:
-        doc = ctx.module_doc
-        if len(doc) > max_module_doc_chars:
-            doc = doc[:max_module_doc_chars].rstrip() + "..."
-        parts.append(f"Module docstring: {doc}")
-    if ctx.class_name:
-        line = f"Enclosing class: {ctx.class_name}"
-        # Skip class_doc if it matches module_doc (common in Java, where the
-        # top-level class's Javadoc is the "module doc" analog).
-        if ctx.class_doc and ctx.class_doc.strip() != (ctx.module_doc or "").strip():
-            cdoc = ctx.class_doc
-            if len(cdoc) > max_class_doc_chars:
-                cdoc = cdoc[:max_class_doc_chars].rstrip() + "..."
-            line += f" — {cdoc}"
-        parts.append(line)
+
+    def _truncate(text: str, max_chars: int) -> str:
+        if len(text) > max_chars:
+            return text[:max_chars].rstrip() + "..."
+        return text
+
+    if ctx.language == "python":
+        if ctx.module_doc:
+            parts.append(f"Module docstring: {_truncate(ctx.module_doc, max_module_doc_chars)}")
+        if ctx.class_name:
+            line = f"Enclosing class: {ctx.class_name}"
+            if ctx.class_doc:
+                line += f" — {_truncate(ctx.class_doc, max_class_doc_chars)}"
+            parts.append(line)
+
+    else:  # java
+        # When the method is in a nested class, show the outer (top-level) class first.
+        if ctx.outer_class_name:
+            line = f"Top-level class: {ctx.outer_class_name}"
+            if ctx.outer_class_doc:
+                line += f" — {_truncate(ctx.outer_class_doc, max_class_doc_chars)}"
+            parts.append(line)
+        if ctx.class_name:
+            label = "Enclosing class" if ctx.outer_class_name else "Class"
+            line = f"{label}: {ctx.class_name}"
+            if ctx.class_doc:
+                line += f" — {_truncate(ctx.class_doc, max_class_doc_chars)}"
+            parts.append(line)
+
     if ctx.imports:
         parts.append("Imports:\n" + "\n".join(ctx.imports))
     return "\n".join(parts)
+
+
+def _build_outline_python(tree: ast.Module, src: str, exclude_name: str | None) -> list[str]:
+    """Walk AST and collect signature + first-line docstring for each function/class.
+
+    Skips any node whose name matches exclude_name (bare, without ClassName. prefix).
+    Returns a list of formatted blocks.
+    """
+    lines = src.splitlines()
+    blocks: list[str] = []
+
+    def _first_doc_line(node: ast.AST) -> str | None:
+        doc = ast.get_docstring(node)
+        if not doc:
+            return None
+        return doc.split("\n")[0].strip()
+
+    def _sig_line(node: ast.AST) -> str:
+        return lines[node.lineno - 1].rstrip()  # type: ignore[attr-defined]
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name == exclude_name:
+                continue
+            sig = _sig_line(node)
+            doc = _first_doc_line(node)
+            blocks.append(f"{sig}\n    \"{doc}\"" if doc else sig)
+        elif isinstance(node, ast.ClassDef):
+            if node.name == exclude_name:
+                continue
+            class_sig = _sig_line(node)
+            class_doc = _first_doc_line(node)
+            class_block = f"{class_sig}\n    \"{class_doc}\"" if class_doc else class_sig
+            method_blocks: list[str] = []
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if item.name == exclude_name:
+                        continue
+                    sig = "    " + _sig_line(item).lstrip()
+                    doc = _first_doc_line(item)
+                    method_blocks.append(f"{sig}\n        \"{doc}\"" if doc else sig)
+            if method_blocks:
+                blocks.append(class_block + "\n\n" + "\n\n".join(method_blocks))
+            else:
+                blocks.append(class_block)
+
+    return blocks
+
+
+def extract_file_outline(
+    repo: str,
+    path: str,
+    exclude_func_name: str | None = None,
+    language: str = "python",
+    max_chars: int = 4000,
+) -> str:
+    """Return a compact outline of the file suitable for prompt inclusion.
+
+    For Python: extracts function/class signatures and their first-line docstrings
+    via AST, skipping the target function. This gives the LLM naming conventions
+    and documentation style without flooding it with implementation details.
+
+    For Java / other: falls back to truncated raw source.
+
+    `exclude_func_name` may be a bare name or 'ClassName.method' — only the bare
+    name is used for matching, so either form works.
+    """
+    bare_exclude: str | None = None
+    if exclude_func_name:
+        bare_exclude = exclude_func_name.split(".")[-1]
+
+    if language == "python":
+        parsed = _parse(repo, path)
+        if parsed is not None:
+            tree, src = parsed
+            blocks = _build_outline_python(tree, src, bare_exclude)
+            outline = "\n\n".join(blocks)
+            if len(outline) > max_chars:
+                outline = outline[:max_chars].rstrip() + "\n... [truncated]"
+            return outline
+        # Parse failed (e.g. Python 2 syntax) — return nothing rather than
+        # risk leaking the target function's docstring via raw source.
+        return ""
+
+    if language == "java":
+        from .file_context_java import _build_outline_java, _parse as _java_parse
+        root, src = _java_parse(repo, path)
+        blocks = _build_outline_java(root, src, bare_exclude)
+        outline = "\n\n".join(blocks)
+        if len(outline) > max_chars:
+            outline = outline[:max_chars].rstrip() + "\n... [truncated]"
+        return outline
+
+    # Unsupported language — return nothing rather than risk leaking docstrings.
+    return ""

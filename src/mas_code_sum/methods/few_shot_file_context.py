@@ -1,32 +1,23 @@
-"""Few-shot summarizer that adds file-level context (module doc, class, imports) to the query.
+"""Few-shot summarizer that adds file-level context (class, imports) to the query.
 
 Extends the repo-level enrichment of FewShotContextEnrichedSummarizer by pulling
 extra signals from the actual file at `dataset/repos/{repo}/{path}`:
 
-  - module docstring
-  - enclosing class name + docstring (if the target function is a method)
-  - top-of-file imports
+  Python:
+    - module docstring (outer context above the class)
+    - enclosing class name + docstring
+    - top-of-file imports
 
-v1 scope:
-  - Python only (non-Python queries fall back to repo-level enrichment).
-  - Query-only enrichment: few-shot examples keep the lighter repo-level block
-    to save tokens and isolate the effect of file context.
+  Java:
+    - enclosing class name + Javadoc
+    - top-level class name + Javadoc (outer context, only when method is nested)
+    - top-of-file imports
 
-Prompt structure per few-shot example (same as few_shot_context_enriched):
-  Repository: {repo}
-  Repository description: {about}
-  Code:
-  {code}
-  Summary: <s>{docstring}</s>
-
-Query block (Python only):
+Query block:
   Repository: {repo}
   Repository description: {about}
   File: {path}
-  Module docstring: ...
-  Enclosing class: Foo — ...
-  Imports:
-  import ...
+  <language-specific context block>
   Code:
   {code}
   Summary: <s>
@@ -34,13 +25,18 @@ Query block (Python only):
 
 from ..enrichers.file_context import extract_file_context, render_file_context
 from ..retrievers.base import BaseRetriever
-from .base import BaseSummarizer, make_openai_clients, strip_code_fences
+from .base import (
+    BaseSummarizer,
+    extract_summary,
+    make_clients,
+    strip_code_fences,
+)
 from .few_shot_context_enriched import _build_block
 from .zero_shot_context_enriched import _get_metadata_index
 
 
 class FewShotFileContextSummarizer(BaseSummarizer):
-    """Few-shot LLM summarizer with query-side file-level context (Python only)."""
+    """Few-shot LLM summarizer with query-side file-level context (Python and Java)."""
 
     name = "few_shot_file_context"
 
@@ -49,18 +45,20 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         model: str = "meta-llama/llama-3.1-8b-instruct",
         retriever: BaseRetriever = None,
         example_paths: bool = False,
-        use_module_doc: bool = True,
+        use_outer_context: bool = True,
         use_class_context: bool = True,
         max_imports: int = 25,
+        backend: str = "featherless",
     ):
         self.model = model
         self.retriever = retriever
         self.example_paths = example_paths
-        self.use_module_doc = use_module_doc
+        self.use_outer_context = use_outer_context
         self.use_class_context = use_class_context
         self.max_imports = max_imports  # 0 disables imports entirely
-        self.max_concurrency = 10
-        self._client, self._async_client = make_openai_clients()
+        self.backend = backend
+        self.max_concurrency = 2
+        self._client, self._async_client = make_clients(backend)
 
     def _example_block(self, s: dict) -> str:
         code = " ".join(s["code_tokens"])
@@ -92,8 +90,10 @@ class FewShotFileContextSummarizer(BaseSummarizer):
                 project, path, code=code, max_imports=self.max_imports, language=language
             )
             # Apply per-field gates before rendering.
-            if not self.use_module_doc:
-                ctx.module_doc = None
+            if not self.use_outer_context:
+                ctx.module_doc = None          # Python
+                ctx.outer_class_name = None    # Java nested-class outer context
+                ctx.outer_class_doc = None
             if not self.use_class_context:
                 ctx.class_name = None
                 ctx.class_doc = None
@@ -122,9 +122,7 @@ class FewShotFileContextSummarizer(BaseSummarizer):
             temperature=0.0,
         )
         raw = response.choices[0].text or ""
-        end = raw.find("</s>")
-        comment = raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
-        return strip_code_fences(comment)
+        return strip_code_fences(extract_summary(raw))
 
     def summarize(
         self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None
@@ -137,9 +135,7 @@ class FewShotFileContextSummarizer(BaseSummarizer):
             temperature=0.0,
         )
         raw = response.choices[0].text or ""
-        end = raw.find("</s>")
-        comment = raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
-        return strip_code_fences(comment)
+        return strip_code_fences(extract_summary(raw))
 
     def params(self) -> dict:
         return {
@@ -147,7 +143,8 @@ class FewShotFileContextSummarizer(BaseSummarizer):
             "retriever": type(self.retriever).__name__,
             "n_shots": self.retriever.n,
             "example_paths": self.example_paths,
-            "use_module_doc": self.use_module_doc,
+            "use_outer_context": self.use_outer_context,
             "use_class_context": self.use_class_context,
             "max_imports": self.max_imports,
+            "backend": self.backend,
         }
