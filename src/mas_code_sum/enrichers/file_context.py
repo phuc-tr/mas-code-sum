@@ -291,6 +291,7 @@ def extract_file_outline(
     exclude_func_name: str | None = None,
     language: str = "python",
     max_chars: int = 4000,
+    cutoff_timestamp: str | None = None,
 ) -> str:
     """Return a compact outline of the file suitable for prompt inclusion.
 
