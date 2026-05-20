@@ -4,12 +4,47 @@ A framework for experimenting with code summarization methods and tracking resul
 
 ---
 
+## Results
+
+### Per-project BLEU — Llama 3.1 8B (base), BM25 n=10
+
+| Project | CodeT5 | FewShot LLM | ASAP | All Context |
+|---|---:|---:|---:|---:|
+| apache/airflow | 18.88 | 27.91 | 24.05 | **33.39** |
+| vaexio/vaex | 18.13 | 25.02 | 23.78 | **30.25** |
+| Qiskit/qiskit-terra | 21.21 | 27.48 | 24.81 | **34.08** |
+| PyCQA/pylint | 19.80 | 21.89 | 20.95 | **23.61** |
+| h2oai/h2o-3 | 16.36 | 22.87 | 21.45 | **26.78** |
+| oblac/jodd | 18.16 | 20.67 | 25.34 | **30.89** |
+| orientechnologies/orientdb | 18.97 | 27.24 | 20.81 | **32.59** |
+| real-logic/aeron | 17.11 | 22.44 | 20.03 | **27.49** |
+| spring-projects/spring-security | 16.01 | 19.85 | 19.91 | **25.71** |
+| wildfly/wildfly | 16.06 | 21.54 | 18.21 | **25.98** |
+| **Aggregate** | 18.07 | 23.69 | 21.93 | **29.08** |
+
+### Aggregate BLEU — all models
+
+| Method | Model | n | BLEU |
+|---|---|---:|---:|
+| `few_shot_all_context` | Llama 3.1 8B (base) | 10 | **29.08** |
+| `few_shot_all_context` | Llama 3.3 70B Instruct | 10 | 27.49 |
+| `few_shot_all_context` | Qwen3 8B | 10 | 25.05 |
+| `few_shot_all_context` | Llama 3.1 8B Instruct | 10 | 25.00 |
+| `few_shot_llm` | Llama 3.1 8B (base) | 10 | 23.69 |
+| `few_shot_asap` | Llama 3.1 8B (base) | 3 | 21.93 |
+| `few_shot_asap` | Llama 3.1 8B Instruct | 3 | 20.67 |
+| `few_shot_llm` | Llama 3.1 8B Instruct | 10 | 20.66 |
+| `codet5` | CodeT5-base-multi-sum | — | 18.07 |
+
+---
+
 ## Table of Contents
 
 - [Project Structure](#project-structure)
 - [Setup](#setup)
 - [Dataset](#dataset)
   - [Standard Dataset](#standard-dataset)
+  - [Few-shots Pool](#few-shots-pool)
   - [Same-project Dataset](#same-project-dataset)
   - [Schema](#schema)
 - [Running Experiments](#running-experiments)
@@ -36,6 +71,8 @@ mas-code-sum/
 │   │   └── {project}/
 │   │       ├── train.jsonl
 │   │       └── test.jsonl
+│   ├── few_shots/               # per-language few-shot pools extracted from raw repos
+│   │   └── {language}.jsonl
 │   └── repos/                   # cloned repos (used by file_context enricher)
 ├── experiments/
 │   └── *.yaml                   # experiment configs
@@ -55,6 +92,7 @@ mas-code-sum/
 │   │   ├── few_shot_llm.py
 │   │   ├── few_shot_context_enriched.py
 │   │   ├── few_shot_file_context.py
+│   │   ├── few_shot_all_context.py
 │   │   ├── few_shot_critic.py
 │   │   ├── few_shot_asap.py
 │   │   ├── codet5_summarizer.py
@@ -65,8 +103,7 @@ mas-code-sum/
 │   │   ├── random.py
 │   │   ├── random_same_project.py
 │   │   ├── bm25.py
-│   │   ├── directory.py
-│   │   └── hyde.py
+│   │   └── directory.py
 │   └── enrichers/
 │       ├── dfg_loader.py        # data-flow graph features
 │       ├── identifier_extractor.py
@@ -86,10 +123,11 @@ This project uses [uv](https://github.com/astral-sh/uv) for dependency managemen
 uv sync
 ```
 
-LLM methods call models via [OpenRouter](https://openrouter.ai). Set the API key before running:
+LLM methods support two backends. Set the relevant API key(s):
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-...
+export OPENROUTER_API_KEY=sk-or-...   # OpenRouter
+export FEATHERLESS_API_KEY=...         # Featherless (default for completions-based methods)
 ```
 
 MLflow tracking URI defaults to `http://127.0.0.1:5000`. Override with:
@@ -123,6 +161,12 @@ cd dataset && python collect_data.py
 ```bash
 cd dataset && python split_jsonl_by_blame.py
 ```
+
+### Few-shots Pool
+
+`dataset/few_shots/` holds a per-language pool of examples extracted directly from cloned repository source files (rather than from the standard CodeSearchNet splits). Use `scripts/extract_repo_few_shots.py` to rebuild it after cloning repos with `scripts/clone_dataset_repos.py`.
+
+This pool is used by retrievers when `pool: few_shots` is set in the config.
 
 ### Same-project Dataset
 
@@ -217,12 +261,13 @@ Per-project metrics are logged with a `{project}/` prefix. Aggregate metrics (no
 | `few_shot_llm` | `FewShotLLMSummarizer` | Few-shot with retrieved examples |
 | `few_shot_context_enriched` | `FewShotContextEnrichedSummarizer` | Few-shot + repo/file context in each block |
 | `few_shot_file_context` | `FewShotFileContextSummarizer` | Few-shot + file-level context (module doc, class, imports) |
+| `few_shot_all_context` | `FewShotAllContextSummarizer` | Few-shot + file context and file outline merged in a single completions pass |
 | `few_shot_critic` | `FewShotCriticSummarizer` | Generate then self-critique and refine |
 | `few_shot_asap` | `FewShotAsapSummarizer` | Replicates the ASAP completion-style prompt |
 | `codet5` | `CodeT5Summarizer` | Fine-tuned CodeT5 model (no LLM API required) |
 | `style_guided` | `StyleGuidedSummarizer` | Few-shot with a project-level style guide derived from training summaries |
 
-LLM-based methods call models via OpenRouter using the OpenAI-compatible API. The base URL and client construction are centralized in `src/mas_code_sum/methods/base.py`.
+LLM-based methods call models via OpenRouter or Featherless using the OpenAI-compatible API. The backend and client construction are centralized in `src/mas_code_sum/methods/base.py`. Specify the backend per method with `backend: featherless` or `backend: openrouter` in `method_params`.
 
 ---
 
@@ -232,13 +277,28 @@ Retrievers fetch training examples for few-shot methods. They are configured sep
 
 | Key | Class | Description |
 |---|---|---|
-| `random` | `RandomRetriever` | Random samples from the training split |
+| `random` | `RandomRetriever` | Random samples from the retrieval pool |
 | `random_same_project` | `RandomSameProjectRetriever` | Random samples from the same project |
 | `bm25` | `BM25Retriever` | BM25 lexical similarity over code tokens |
 | `directory` | `DirectoryRetriever` | Examples from the same directory as the query |
-| `hyde` | `HyDERetriever` | HyDE: generate a hypothetical docstring, retrieve by BM25 over docstring tokens |
 
 All retrievers implement `BaseRetriever.retrieve(code, language, n, project, path) -> list[dict]`.
+
+### Retrieval Pool
+
+`random`, `bm25`, and `directory` support a `pool` parameter:
+
+| Value | Source |
+|---|---|
+| `train` (default) | Standard train split for the language |
+| `few_shots` | `dataset/few_shots/{language}.jsonl` — examples extracted from raw repo source files via `scripts/extract_repo_few_shots.py` |
+
+```yaml
+retriever: bm25
+retriever_params:
+  n: 5
+  pool: few_shots
+```
 
 ---
 
