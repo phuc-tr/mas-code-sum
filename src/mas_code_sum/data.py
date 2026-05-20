@@ -9,6 +9,7 @@ from typing import Iterator
 DATASET_DIR = Path(__file__).parents[2] / "dataset"
 LANGUAGES = ["python", "java", "javascript", "go", "php", "ruby"]
 SAME_PROJECT_DIR = DATASET_DIR / "Same-project"
+FEW_SHOTS_DIR = DATASET_DIR / "few_shots"
 
 
 def iter_samples(language: str, split: str = "test") -> Iterator[dict]:
@@ -37,6 +38,13 @@ def iter_same_project_samples(project: str, split: str = "test") -> Iterator[dic
 
 def load_samples(language: str, split: str = "test") -> list[dict]:
     return list(iter_samples(language, split))
+
+
+def load_few_shot_samples(language: str) -> list[dict]:
+    """Load all samples from dataset/few_shots/{language}.jsonl."""
+    path = FEW_SHOTS_DIR / f"{language}.jsonl"
+    with open(path) as f:
+        return [json.loads(line) for line in f if line.strip()]
 
 
 def load_projects(

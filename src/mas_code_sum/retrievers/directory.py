@@ -3,7 +3,7 @@
 from collections import defaultdict
 from pathlib import PurePosixPath
 
-from ..data import load_samples
+from ..data import load_few_shot_samples, load_samples
 from .base import BaseRetriever
 
 
@@ -21,22 +21,32 @@ def _common_prefix_len(a: str, b: str) -> int:
 
 
 class DirectoryRetriever(BaseRetriever):
-    """Retrieve n training samples whose file path is closest to the query path.
+    """Retrieve samples whose file path is closest to the query path.
 
     Closeness is measured by the number of leading path components shared with
     the query path (longer common prefix = closer).  Samples from the same
     project are required; if ``path`` is not supplied the retriever falls back
     to returning samples in dataset order.
+
+    Args:
+        n: number of examples to return
+        pool: ``"train"`` uses the existing train split; ``"few_shots"`` uses
+            the pool extracted from raw repo source files.
     """
 
-    def __init__(self, n: int = 3):
+    def __init__(self, n: int = 3, pool: str = "train"):
         self.n = n
+        self.pool = pool
         self._cache: dict[str, dict[str, list[dict]]] = {}  # language -> project -> samples
 
     def _ensure_cache(self, language: str) -> None:
         if language not in self._cache:
             by_project: dict[str, list[dict]] = defaultdict(list)
-            for sample in load_samples(language, split="train"):
+            source = (
+                load_few_shot_samples(language) if self.pool == "few_shots"
+                else load_samples(language, split="train")
+            )
+            for sample in source:
                 by_project[sample["repo"]].append(sample)
             self._cache[language] = dict(by_project)
 

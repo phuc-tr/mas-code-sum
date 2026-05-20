@@ -1,0 +1,16 @@
+method: few_shot_llm
+
+method_params:
+  model: deepseek/deepseek-chat-v3.1
+  backend: openrouter
+
+retriever: bm25
+retriever_params:
+  n: 10
+
+languages:
+  - python
+  - java
+
+max_samples: null
+num_runs: 1

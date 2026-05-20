@@ -2,15 +2,22 @@
 
 from rank_bm25 import BM25Okapi
 
-from ..data import SAME_PROJECT_DIR, iter_same_project_samples, load_samples
+from ..data import SAME_PROJECT_DIR, iter_same_project_samples, load_few_shot_samples, load_samples
 from .base import BaseRetriever
 
 
 class BM25Retriever(BaseRetriever):
-    """Retrieve n training samples ranked by BM25 score against the query code tokens."""
+    """Retrieve samples ranked by BM25 score against the query code tokens.
 
-    def __init__(self, n: int = 3):
+    Args:
+        n: number of examples to return
+        pool: ``"train"`` uses the existing train split; ``"few_shots"`` uses
+            the pool extracted from raw repo source files.
+    """
+
+    def __init__(self, n: int = 3, pool: str = "train"):
         self.n = n
+        self.pool = pool
         self._samples: dict[str, list[dict]] = {}
         self._index: dict[str, BM25Okapi] = {}
 
@@ -20,8 +27,12 @@ class BM25Retriever(BaseRetriever):
             self._index[key] = BM25Okapi([s["code_tokens"] for s in samples])
 
     def retrieve(self, code: str, language: str, n: int | None = None, project: str | None = None, path: str | None = None) -> list[dict]:
-        # Use per-project index for same-project dataset; fall back to language-wide index.
-        if project is not None and (SAME_PROJECT_DIR / project).is_dir():
+        if self.pool == "few_shots":
+            key = f"few_shots:{language}"
+            if key not in self._index:
+                self._ensure_index(key, load_few_shot_samples(language))
+        elif project is not None and (SAME_PROJECT_DIR / project).is_dir():
+            # Use per-project index for same-project dataset; fall back to language-wide index.
             key = f"same_project:{project}"
             if key not in self._index:
                 self._ensure_index(key, list(iter_same_project_samples(project, split="train")))
@@ -36,7 +47,7 @@ class BM25Retriever(BaseRetriever):
         samples = self._samples[key]
         ranked = sorted(range(len(samples)), key=lambda i: scores[i], reverse=True)
 
-        if project is not None and key == language:
+        if project is not None and key in (language, f"few_shots:{language}"):
             ranked = [i for i in ranked if samples[i]["repo"] == project]
 
         return [samples[i] for i in ranked[:k]]

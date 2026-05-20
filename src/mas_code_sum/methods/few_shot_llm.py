@@ -7,11 +7,7 @@ Code:
 Summary: <s>{docstring}</s>"""
 
 FINAL_TEMPLATE = """\
-Here are some examples of code summarization from the same project:
-
 {examples}
-
-Now summarize the following code in one sentence. Output only the summary, no explanation:
 
 Code:
 {code}
