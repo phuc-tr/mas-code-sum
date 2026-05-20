@@ -1,47 +1,36 @@
+<div align="center">
+
 # mas-code-sum
 
-A framework for experimenting with code summarization methods and tracking results with MLflow.
+**Multi-method code summarization research framework**
+
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/)
+[![MLflow](https://img.shields.io/badge/tracking-MLflow-0194E2.svg)](https://mlflow.org/)
+[![uv](https://img.shields.io/badge/package%20manager-uv-purple.svg)](https://github.com/astral-sh/uv)
+
+Plug-in methods · BM25 / directory retrieval · BLEU · ROUGE-L · BERTScore
+
+</div>
 
 ---
 
-## Results
+## Overview
 
-### Per-project BLEU — Llama 3.1 8B (base), BM25 n=10
+`mas-code-sum` is an experiment framework for studying LLM-based code summarization. It provides:
 
-| Project | CodeT5 | FewShot LLM | ASAP | All Context |
-|---|---:|---:|---:|---:|
-| apache/airflow | 18.88 | 27.91 | 24.05 | **33.39** |
-| vaexio/vaex | 18.13 | 25.02 | 23.78 | **30.25** |
-| Qiskit/qiskit-terra | 21.21 | 27.48 | 24.81 | **34.08** |
-| PyCQA/pylint | 19.80 | 21.89 | 20.95 | **23.61** |
-| h2oai/h2o-3 | 16.36 | 22.87 | 21.45 | **26.78** |
-| oblac/jodd | 18.16 | 20.67 | 25.34 | **30.89** |
-| orientechnologies/orientdb | 18.97 | 27.24 | 20.81 | **32.59** |
-| real-logic/aeron | 17.11 | 22.44 | 20.03 | **27.49** |
-| spring-projects/spring-security | 16.01 | 19.85 | 19.91 | **25.71** |
-| wildfly/wildfly | 16.06 | 21.54 | 18.21 | **25.98** |
-| **Aggregate** | 18.07 | 23.69 | 21.93 | **29.08** |
+- **Pluggable methods** — zero-shot, few-shot, ASAP, file-context enriched, critic-based, CodeT5
+- **Pluggable retrievers** — BM25, directory proximity, random, same-project
+- **MLflow integration** — every run logs params, per-project metrics, and prediction artifacts automatically
+- **YAML-driven experiments** — swap models, retrievers, and datasets without touching code
 
-### Aggregate BLEU — all models
-
-| Method | Model | n | BLEU |
-|---|---|---:|---:|
-| `few_shot_all_context` | Llama 3.1 8B (base) | 10 | **29.08** |
-| `few_shot_all_context` | Llama 3.3 70B Instruct | 10 | 27.49 |
-| `few_shot_all_context` | Qwen3 8B | 10 | 25.05 |
-| `few_shot_all_context` | Llama 3.1 8B Instruct | 10 | 25.00 |
-| `few_shot_llm` | Llama 3.1 8B (base) | 10 | 23.69 |
-| `few_shot_asap` | Llama 3.1 8B (base) | 3 | 21.93 |
-| `few_shot_asap` | Llama 3.1 8B Instruct | 3 | 20.67 |
-| `few_shot_llm` | Llama 3.1 8B Instruct | 10 | 20.66 |
-| `codet5` | CodeT5-base-multi-sum | — | 18.07 |
+All runs are tracked in MLflow under the **`code-summarization`** experiment. Open the UI at any time with `mlflow ui`.
 
 ---
 
 ## Table of Contents
 
-- [Project Structure](#project-structure)
 - [Setup](#setup)
+- [Project Structure](#project-structure)
 - [Dataset](#dataset)
   - [Standard Dataset](#standard-dataset)
   - [Few-shots Pool](#few-shots-pool)
@@ -54,6 +43,30 @@ A framework for experimenting with code summarization methods and tracking resul
 - [Retrievers](#retrievers)
 - [Adding a New Method](#adding-a-new-method)
 - [Adding a New Metric](#adding-a-new-metric)
+- [Results](#results)
+
+---
+
+## Setup
+
+This project uses [uv](https://github.com/astral-sh/uv) for dependency management.
+
+```bash
+uv sync
+```
+
+LLM methods support two backends. Set the relevant API key(s):
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...   # OpenRouter
+export FEATHERLESS_API_KEY=...         # Featherless (default for completions-based methods)
+```
+
+MLflow tracking URI defaults to `http://127.0.0.1:5000`. Override with:
+
+```bash
+export MLFLOW_TRACKING_URI=http://...
+```
 
 ---
 
@@ -111,29 +124,6 @@ mas-code-sum/
 │       └── file_context_java.py # same for Java
 ├── run_experiment.py            # CLI entrypoint
 └── pyproject.toml
-```
-
----
-
-## Setup
-
-This project uses [uv](https://github.com/astral-sh/uv) for dependency management.
-
-```bash
-uv sync
-```
-
-LLM methods support two backends. Set the relevant API key(s):
-
-```bash
-export OPENROUTER_API_KEY=sk-or-...   # OpenRouter
-export FEATHERLESS_API_KEY=...         # Featherless (default for completions-based methods)
-```
-
-MLflow tracking URI defaults to `http://127.0.0.1:5000`. Override with:
-
-```bash
-export MLFLOW_TRACKING_URI=http://...
 ```
 
 ---
@@ -350,3 +340,37 @@ def compute_metrics(predictions: list[str], references: list[str]) -> dict[str, 
         "my_metric": ...,   # appears automatically in MLflow
     }
 ```
+
+---
+
+## Results
+
+### Per-project BLEU — Llama 3.1 8B (base), BM25 n=10
+
+| Project | CodeT5 | FewShot LLM | ASAP | All Context |
+|---|---:|---:|---:|---:|
+| apache/airflow | 18.88 | 27.91 | 24.05 | **33.39** |
+| vaexio/vaex | 18.13 | 25.02 | 23.78 | **30.25** |
+| Qiskit/qiskit-terra | 21.21 | 27.48 | 24.81 | **34.08** |
+| PyCQA/pylint | 19.80 | 21.89 | 20.95 | **23.61** |
+| h2oai/h2o-3 | 16.36 | 22.87 | 21.45 | **26.78** |
+| oblac/jodd | 18.16 | 20.67 | 25.34 | **30.89** |
+| orientechnologies/orientdb | 18.97 | 27.24 | 20.81 | **32.59** |
+| real-logic/aeron | 17.11 | 22.44 | 20.03 | **27.49** |
+| spring-projects/spring-security | 16.01 | 19.85 | 19.91 | **25.71** |
+| wildfly/wildfly | 16.06 | 21.54 | 18.21 | **25.98** |
+| **Aggregate** | 18.07 | 23.69 | 21.93 | **29.08** |
+
+### Aggregate BLEU — all models
+
+| Method | Model | n | BLEU |
+|---|---|---:|---:|
+| `few_shot_all_context` | Llama 3.1 8B (base) | 10 | **29.08** |
+| `few_shot_all_context` | Llama 3.3 70B Instruct | 10 | 27.49 |
+| `few_shot_all_context` | Qwen3 8B | 10 | 25.05 |
+| `few_shot_all_context` | Llama 3.1 8B Instruct | 10 | 25.00 |
+| `few_shot_llm` | Llama 3.1 8B (base) | 10 | 23.69 |
+| `few_shot_asap` | Llama 3.1 8B (base) | 3 | 21.93 |
+| `few_shot_asap` | Llama 3.1 8B Instruct | 3 | 20.67 |
+| `few_shot_llm` | Llama 3.1 8B Instruct | 10 | 20.66 |
+| `codet5` | CodeT5-base-multi-sum | — | 18.07 |
