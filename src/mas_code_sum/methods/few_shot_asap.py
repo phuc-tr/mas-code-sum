@@ -23,14 +23,14 @@ Then for the query:
   Comment:
 
 DFG requires pre-computation:
-  bash scripts/setup_dfg_parser.sh
-  python scripts/precompute_dfg.py
+  bash asap_scripts/setup_dfg_parser.sh
+  python asap_scripts/precompute_dfg.py
 """
 
 from __future__ import annotations
 
-from ..enrichers.dfg_loader import get_dfg_loader
-from ..enrichers.identifier_extractor import extract_identifier_context
+from ..enrichers.asap.dfg_loader import get_dfg_loader
+from ..enrichers.asap.identifier_extractor import extract_identifier_context
 from ..retrievers.base import BaseRetriever
 from .base import BaseSummarizer, make_clients, strip_code_fences
 
