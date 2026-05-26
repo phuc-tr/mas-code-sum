@@ -20,11 +20,14 @@ def main(config_path: str) -> None:
     if method_key not in REGISTRY:
         raise ValueError(f"Unknown method '{method_key}'. Available: {list(REGISTRY)}")
 
+    dataset_version = cfg.get("dataset_version", "v1")
+
     retriever = None
     if retriever_key := cfg.get("retriever"):
         if retriever_key not in RETRIEVER_REGISTRY:
             raise ValueError(f"Unknown retriever '{retriever_key}'. Available: {list(RETRIEVER_REGISTRY)}")
-        retriever = RETRIEVER_REGISTRY[retriever_key](**cfg.get("retriever_params", {}))
+        retriever_params = {"dataset_version": dataset_version, **cfg.get("retriever_params", {})}
+        retriever = RETRIEVER_REGISTRY[retriever_key](**retriever_params)
 
     method_params = cfg.get("method_params", {})
     if retriever is not None:
@@ -39,6 +42,7 @@ def main(config_path: str) -> None:
         num_runs=cfg.get("num_runs", 1),
         dataset=cfg.get("dataset", "standard"),
         projects=cfg.get("projects"),
+        dataset_version=dataset_version,
     )
 
 

@@ -6,15 +6,18 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
 
-DATASET_DIR = Path(__file__).parents[2] / "dataset"
+_BASE_DATASET_DIR = Path(__file__).parents[2] / "dataset"
 LANGUAGES = ["python", "java", "javascript", "go", "php", "ruby"]
-SAME_PROJECT_DIR = DATASET_DIR / "Same-project"
-FEW_SHOTS_DIR = DATASET_DIR / "few_shots"
+SAME_PROJECT_DIR = _BASE_DATASET_DIR / "Same-project"
 
 
-def iter_samples(language: str, split: str = "test") -> Iterator[dict]:
-    """Yield samples from dataset/{language}/{split}.jsonl."""
-    path = DATASET_DIR / language / f"{split}.jsonl"
+def _versioned_dir(dataset_version: str) -> Path:
+    return _BASE_DATASET_DIR / dataset_version
+
+
+def iter_samples(language: str, split: str = "test", dataset_version: str = "v1") -> Iterator[dict]:
+    """Yield samples from dataset/{dataset_version}/{language}/{split}.jsonl."""
+    path = _versioned_dir(dataset_version) / language / f"{split}.jsonl"
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -36,21 +39,15 @@ def iter_same_project_samples(project: str, split: str = "test") -> Iterator[dic
                 yield sample
 
 
-def load_samples(language: str, split: str = "test") -> list[dict]:
-    return list(iter_samples(language, split))
-
-
-def load_few_shot_samples(language: str) -> list[dict]:
-    """Load all samples from dataset/few_shots/{language}.jsonl."""
-    path = FEW_SHOTS_DIR / f"{language}.jsonl"
-    with open(path) as f:
-        return [json.loads(line) for line in f if line.strip()]
+def load_samples(language: str, split: str = "test", dataset_version: str = "v1") -> list[dict]:
+    return list(iter_samples(language, split, dataset_version))
 
 
 def load_projects(
     languages: list[str],
     split: str = "test",
     max_samples_per_project: int | None = None,
+    dataset_version: str = "v1",
 ) -> dict[str, list[dict]]:
     """
     Load samples grouped by repo (project) across the given languages.
@@ -59,6 +56,7 @@ def load_projects(
         languages: languages to load from
         split: dataset split to use
         max_samples_per_project: if set, cap the number of samples kept per project
+        dataset_version: versioned subdirectory under dataset/ (e.g. "v1", "v2")
 
     Returns:
         dict mapping repo -> list of samples
@@ -66,7 +64,7 @@ def load_projects(
     projects: dict[str, list[dict]] = defaultdict(list)
 
     for language in languages:
-        for sample in iter_samples(language, split):
+        for sample in iter_samples(language, split, dataset_version):
             projects[sample["repo"]].append(sample)
 
     if max_samples_per_project is not None:

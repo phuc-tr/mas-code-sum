@@ -28,6 +28,7 @@ def run_experiment(
     num_runs: int = 1,
     dataset: str = "standard",
     projects: list[str] | None = None,
+    dataset_version: str = "v1",
 ) -> None:
     """
     Run a summarization experiment across all projects found in the given languages.
@@ -54,8 +55,8 @@ def run_experiment(
         print("Loading Same-project dataset...")
         projects = load_same_project_projects(max_samples_per_project=max_samples, projects=projects)
     else:
-        print(f"Loading projects for languages: {languages}...")
-        projects = load_projects(languages, max_samples_per_project=max_samples)
+        print(f"Loading projects for languages: {languages} (dataset {dataset_version})...")
+        projects = load_projects(languages, max_samples_per_project=max_samples, dataset_version=dataset_version)
     print(f"Found {len(projects)} projects.")
 
     artifact_rows: list[tuple[dict, int, str, str]] = []
@@ -72,6 +73,7 @@ def run_experiment(
         mlflow.log_params({
             "method": method.name,
             "dataset": dataset,
+            "dataset_version": dataset_version,
             "languages": str(languages) if dataset == "standard" else "n/a",
             "max_samples_per_project": max_samples or "all",
             "num_runs": num_runs,
