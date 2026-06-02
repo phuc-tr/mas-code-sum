@@ -2,7 +2,7 @@
 # Sets up the CodeXGLUE DFG parser under asap_scripts/scripts/parser/.
 #
 # Usage (from repo root):
-#   bash scripts/setup_dfg_parser.sh
+#   bash asap_scripts/setup_dfg_parser.sh
 #
 # After this runs you should have:
 #   asap_scripts/scripts/parser/__init__.py

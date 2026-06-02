@@ -1,0 +1,17 @@
+method: few_shot_llm
+
+method_params:
+  model: meta-llama/Meta-Llama-3.1-8B
+  backend: featherless
+
+retriever: bm25
+retriever_params:
+  n: 10
+
+languages:
+  - python
+  - java
+
+dataset_version: v2
+max_samples: null
+num_runs: 1

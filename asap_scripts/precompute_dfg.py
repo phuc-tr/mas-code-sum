@@ -5,7 +5,7 @@ Uses modern tree-sitter (v0.21+) with the DFG/utils logic from the CodeXGLUE
 parser package (asap_scripts/scripts/parser/).
 
 Usage (from repo root):
-    python scripts/precompute_dfg.py [--languages python java] [--splits train test]
+    python asap_scripts/precompute_dfg.py [--languages python java] [--splits train test]
 
 Output:
     dataset/{language}/{split}_dfg.json  — {url: dfg_text} mapping

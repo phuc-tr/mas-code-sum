@@ -6,7 +6,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 
-from openai import AsyncOpenAI, OpenAI, RateLimitError
+from openai import AsyncOpenAI, InternalServerError, OpenAI, RateLimitError
 from tqdm.asyncio import tqdm as atqdm
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -18,16 +18,22 @@ _RATE_LIMIT_INITIAL_WAIT = 5.0
 _RATE_LIMIT_MAX_RETRIES = 6
 
 
+def _is_capacity_error(exc: InternalServerError) -> bool:
+    return exc.status_code == 503 or "capacity" in str(exc).lower()
+
+
 async def _call_with_rate_limit_retry(coro_factory):
-    """Call *coro_factory* and await the result, retrying on RateLimitError."""
+    """Call *coro_factory* and await the result, retrying on RateLimitError or 503 capacity errors."""
     wait = _RATE_LIMIT_INITIAL_WAIT
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         try:
             return await coro_factory()
-        except RateLimitError:
+        except (RateLimitError, InternalServerError) as exc:
+            if isinstance(exc, InternalServerError) and not _is_capacity_error(exc):
+                raise
             if attempt == _RATE_LIMIT_MAX_RETRIES:
                 raise
-            logging.warning("Rate limited; retrying in %.0fs (attempt %d/%d)", wait, attempt + 1, _RATE_LIMIT_MAX_RETRIES)
+            logging.warning("%s; retrying in %.0fs (attempt %d/%d)", type(exc).__name__, wait, attempt + 1, _RATE_LIMIT_MAX_RETRIES)
             await asyncio.sleep(wait)
             wait = min(wait * 2, 300)
 

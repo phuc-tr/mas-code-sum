@@ -25,6 +25,16 @@ def iter_samples(language: str, split: str = "test", dataset_version: str = "v1"
                 yield json.loads(line)
 
 
+def _iter_flat_samples(split: str, dataset_version: str) -> Iterator[dict]:
+    """Yield samples from a flat dataset/{dataset_version}/{split}.jsonl (e.g. v3)."""
+    path = _versioned_dir(dataset_version) / f"{split}.jsonl"
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
+
+
 def iter_same_project_samples(project: str, split: str = "test") -> Iterator[dict]:
     """Yield samples from dataset/Same-project/{project}/{split}.jsonl."""
     path = SAME_PROJECT_DIR / project / f"{split}.jsonl"
@@ -40,6 +50,9 @@ def iter_same_project_samples(project: str, split: str = "test") -> Iterator[dic
 
 
 def load_samples(language: str, split: str = "test", dataset_version: str = "v1") -> list[dict]:
+    flat_path = _versioned_dir(dataset_version) / f"{split}.jsonl"
+    if flat_path.exists():
+        return [s for s in _iter_flat_samples(split, dataset_version) if s.get("language") == language]
     return list(iter_samples(language, split, dataset_version))
 
 
@@ -63,9 +76,16 @@ def load_projects(
     """
     projects: dict[str, list[dict]] = defaultdict(list)
 
-    for language in languages:
-        for sample in iter_samples(language, split, dataset_version):
-            projects[sample["repo"]].append(sample)
+    flat_path = _versioned_dir(dataset_version) / f"{split}.jsonl"
+    if flat_path.exists():
+        lang_set = set(languages) if languages else None
+        for sample in _iter_flat_samples(split, dataset_version):
+            if lang_set is None or sample.get("language") in lang_set:
+                projects[sample["repo"]].append(sample)
+    else:
+        for language in languages:
+            for sample in iter_samples(language, split, dataset_version):
+                projects[sample["repo"]].append(sample)
 
     if max_samples_per_project is not None:
         projects = {repo: random.sample(samples, min(max_samples_per_project, len(samples))) for repo, samples in projects.items()}

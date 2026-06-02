@@ -137,6 +137,23 @@ def run_experiment(
         print(f"  [aggregate] {aggregate}")
         mlflow.log_metrics(aggregate)
         mlflow.log_param("num_samples", len(all_samples))
+
+        # Per-set metrics (for datasets with a 'set' field, e.g. v3)
+        set_values = [s.get("set") for s in all_samples]
+        known_sets = {v for v in set_values if v is not None}
+        for set_name in sorted(known_sets):
+            indices = [i for i, v in enumerate(set_values) if v == set_name]
+            set_refs = [all_references[i] for i in indices]
+            set_run_metrics = [
+                compute_metrics([all_predictions_by_run[i][run_idx] for i in indices], set_refs)
+                for run_idx in range(num_runs)
+            ]
+            set_metrics = {
+                f"{k}_{set_name}": sum(m[k] for m in set_run_metrics) / num_runs
+                for k in set_run_metrics[0]
+            }
+            print(f"  [set={set_name}] {set_metrics}")
+            mlflow.log_metrics(set_metrics)
         _log_predictions_artifact(artifact_rows)
 
 
