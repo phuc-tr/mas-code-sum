@@ -20,6 +20,8 @@ Query block structure:
   Summary: <s>
 """
 
+import logging
+
 from ..enrichers.file_context import (
     _extract_func_name_from_code,
     extract_file_context,
@@ -83,6 +85,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         project: str | None,
         path: str | None,
         blame_timestamp: str | None = None,
+        blame_sha: str | None = None,
     ) -> str:
         about: str | None = None
         if project:
@@ -99,7 +102,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         # File-level context (module doc, enclosing class, imports)
         if language in ("python", "java") and project and path:
             ctx = extract_file_context(
-                project, path, code=code, max_imports=self.max_imports, language=language
+                project, path, code=code, max_imports=self.max_imports, language=language, sha=blame_sha
             )
             if not self.use_outer_context:
                 ctx.module_doc = None
@@ -137,10 +140,11 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         project: str | None,
         path: str | None,
         blame_timestamp: str | None = None,
+        blame_sha: str | None = None,
     ) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
         blocks = [self._example_block(s) for s in examples]
-        blocks.append(self._query_block(code, language, project, path, blame_timestamp=blame_timestamp))
+        blocks.append(self._query_block(code, language, project, path, blame_timestamp=blame_timestamp, blame_sha=blame_sha))
         return "\n\n".join(blocks)
 
     async def async_summarize(
@@ -151,12 +155,13 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         path: str | None = None,
         url: str | None = None,
         blame_timestamp: str | None = None,
+        blame_sha: str | None = None,
     ) -> str:
-        prompt = self.build_prompt(code, language, project, path, blame_timestamp=blame_timestamp)
+        prompt = self.build_prompt(code, language, project, path, blame_timestamp=blame_timestamp, blame_sha=blame_sha)
         response = await self._async_client.completions.create(
             model=self.model,
             prompt=prompt,
-            max_tokens=120,
+            max_tokens=60,
             temperature=0.0,
         )
         raw = response.choices[0].text or ""
@@ -170,8 +175,9 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         path: str | None = None,
         url: str | None = None,
         blame_timestamp: str | None = None,
+        blame_sha: str | None = None,
     ) -> str:
-        prompt = self.build_prompt(code, language, project, path, blame_timestamp=blame_timestamp)
+        prompt = self.build_prompt(code, language, project, path, blame_timestamp=blame_timestamp, blame_sha=blame_sha)
         response = self._client.completions.create(
             model=self.model,
             prompt=prompt,
@@ -190,6 +196,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         urls: list[str | None] | None = None,
         ground_truths: list[str | None] | None = None,
         blame_timestamps: list[str | None] | None = None,
+        blame_shas: list[str | None] | None = None,
     ) -> list[str]:
         import asyncio
         from tqdm.asyncio import tqdm as atqdm
@@ -203,20 +210,22 @@ class FewShotAllContextSummarizer(BaseSummarizer):
             urls = [None] * n
         if blame_timestamps is None:
             blame_timestamps = [None] * n
+        if blame_shas is None:
+            blame_shas = [None] * n
 
         async def _gather():
             sem = asyncio.Semaphore(self.max_concurrency)
 
-            async def _one(code, lang, proj, path, url, blame_ts):
+            async def _one(code, lang, proj, path, url, blame_ts, blame_sha):
                 async with sem:
                     return await _call_with_rate_limit_retry(
-                        lambda: self.async_summarize(code, lang, proj, path, url, blame_timestamp=blame_ts)
+                        lambda: self.async_summarize(code, lang, proj, path, url, blame_timestamp=blame_ts, blame_sha=blame_sha)
                     )
 
             return await atqdm.gather(*[
-                _one(code, lang, proj, path, url, blame_ts)
-                for code, lang, proj, path, url, blame_ts
-                in zip(codes, languages, projects, paths, urls, blame_timestamps)
+                _one(code, lang, proj, path, url, blame_ts, blame_sha)
+                for code, lang, proj, path, url, blame_ts, blame_sha
+                in zip(codes, languages, projects, paths, urls, blame_timestamps, blame_shas)
             ], desc="samples")
 
         return list(asyncio.run(_gather()))

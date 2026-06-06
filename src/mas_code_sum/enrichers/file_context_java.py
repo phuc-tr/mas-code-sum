@@ -14,6 +14,7 @@ Java-specific signals (no forced mapping to Python concepts):
 from __future__ import annotations
 
 import re
+import subprocess
 from functools import lru_cache
 from pathlib import Path
 
@@ -31,19 +32,61 @@ def _repo_dir(repo: str) -> Path:
     return REPOS_ROOT / repo.replace("/", "__")
 
 
+@lru_cache(maxsize=512)
+def _path_at_sha(repo: str, current_path: str, sha: str) -> str:
+    """Return the path `current_path` had at `sha`, following renames backwards."""
+    repo_dir = str(_repo_dir(repo))
+    result = subprocess.run(
+        ["git", "log", "--follow", "--diff-filter=R", "--name-status", "--format=%H", "--", current_path],
+        cwd=repo_dir, capture_output=True, text=True,
+    )
+    lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+    i = 0
+    while i < len(lines):
+        if not lines[i].startswith("R"):
+            commit = lines[i]
+            i += 1
+            if i < len(lines) and lines[i].startswith("R"):
+                parts = lines[i].split("\t")
+                if len(parts) == 3:
+                    old_path = parts[1]
+                    r = subprocess.run(
+                        ["git", "merge-base", "--is-ancestor", sha, commit],
+                        cwd=repo_dir, capture_output=True,
+                    )
+                    if r.returncode == 0:
+                        return old_path
+                i += 1
+        else:
+            i += 1
+    return current_path
+
+
 @lru_cache(maxsize=1)
 def _parser() -> Parser:
     return Parser(Language(tree_sitter_java.language()))
 
 
 @lru_cache(maxsize=512)
-def _load_bytes(repo: str, path: str) -> bytes:
+def _load_bytes(repo: str, path: str, sha: str | None = None) -> bytes | None:
+    if sha is not None:
+        resolved = _path_at_sha(repo, path, sha)
+        result = subprocess.run(
+            ["git", "show", f"{sha}:{resolved}"],
+            cwd=str(_repo_dir(repo)),
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout
     return (_repo_dir(repo) / path).read_bytes()
 
 
 @lru_cache(maxsize=512)
-def _parse(repo: str, path: str) -> tuple[Node, bytes]:
-    src = _load_bytes(repo, path)
+def _parse(repo: str, path: str, sha: str | None = None) -> tuple[Node, bytes] | None:
+    src = _load_bytes(repo, path, sha)
+    if src is None:
+        return None
     tree = _parser().parse(src)
     return tree.root_node, src
 
@@ -194,8 +237,13 @@ def extract_java_file_context(
     func_name: str | None = None,
     code: str | None = None,
     max_imports: int = 25,
+    sha: str | None = None,
 ) -> FileContext:
-    root, src = _parse(repo, path)
+    parsed = _parse(repo, path, sha)
+    if parsed is None:
+        return FileContext(language="java", module_doc=None, class_name=None, class_doc=None,
+                           outer_class_name=None, outer_class_doc=None, imports=[])
+    root, src = parsed
 
     if func_name is None and code is not None:
         func_name = _extract_method_name_from_code(code)

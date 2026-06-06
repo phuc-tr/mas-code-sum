@@ -37,9 +37,15 @@ async def _call_with_rate_limit_retry(coro_factory):
             await asyncio.sleep(wait)
             wait = min(wait * 2, 300)
 
+_log = logging.getLogger(__name__)
+
+
 def extract_summary(raw: str) -> str:
     end = raw.find("</s>")
-    return raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
+    if end == -1:
+        _log.warning("</s> not found in completion: %r", raw)
+        return raw.split("\n")[0].strip()
+    return raw[:end].strip()
 
 
 def make_openai_clients() -> tuple[OpenAI, AsyncOpenAI]:

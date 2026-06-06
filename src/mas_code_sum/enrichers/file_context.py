@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 import warnings
 from dataclasses import dataclass
 from functools import lru_cache
@@ -61,21 +62,69 @@ def _repo_dir(repo: str) -> Path:
 
 
 @lru_cache(maxsize=512)
-def _load_source(repo: str, path: str) -> str:
+def _path_at_sha(repo: str, current_path: str, sha: str) -> str:
+    """Return the path `current_path` had at `sha`, following renames backwards.
+
+    git blame --follow can attribute a line to a commit where the file lived
+    under a different path. Walk the rename chain to find that path.
+    """
+    repo_dir = str(_repo_dir(repo))
+    # Walk rename history for current_path from HEAD back to sha.
+    result = subprocess.run(
+        ["git", "log", "--follow", "--diff-filter=R", "--name-status", "--format=%H", "--", current_path],
+        cwd=repo_dir, capture_output=True, text=True,
+    )
+    lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+    i = 0
+    while i < len(lines):
+        if not lines[i].startswith("R"):
+            commit = lines[i]
+            i += 1
+            if i < len(lines) and lines[i].startswith("R"):
+                parts = lines[i].split("\t")
+                if len(parts) == 3:
+                    old_path = parts[1]
+                    # If sha is an ancestor of (or equal to) this rename commit,
+                    # the file was at old_path at sha.
+                    r = subprocess.run(
+                        ["git", "merge-base", "--is-ancestor", sha, commit],
+                        cwd=repo_dir, capture_output=True,
+                    )
+                    if r.returncode == 0:
+                        return old_path
+                i += 1
+        else:
+            i += 1
+    return current_path
+
+
+@lru_cache(maxsize=512)
+def _load_source(repo: str, path: str, sha: str | None = None) -> str | None:
+    if sha is not None:
+        repo_dir = str(_repo_dir(repo))
+        resolved = _path_at_sha(repo, path, sha)
+        result = subprocess.run(
+            ["git", "show", f"{sha}:{resolved}"],
+            cwd=repo_dir, capture_output=True,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.decode("utf-8", errors="replace")
     file_path = _repo_dir(repo) / path
-    # Let failures surface — per the no-silent-failures rule.
     return file_path.read_text(encoding="utf-8", errors="replace")
 
 
 @lru_cache(maxsize=512)
-def _parse(repo: str, path: str) -> tuple[ast.Module, str] | None:
+def _parse(repo: str, path: str, sha: str | None = None) -> tuple[ast.Module, str] | None:
     """Parse the source file. Returns None (with one-time warning) for Py2/unparseable files.
 
     Dataset contains legacy Python 2 source (e.g., `print "..."`), which Py3's ast
     rejects. This is an external-data boundary — we surface the issue with a warning
     rather than crashing the run.
     """
-    src = _load_source(repo, path)
+    src = _load_source(repo, path, sha)
+    if src is None:
+        return None
     try:
         return ast.parse(src), src
     except SyntaxError as e:
@@ -142,6 +191,7 @@ def extract_file_context(
     code: str | None = None,
     max_imports: int = 25,
     language: str = "python",
+    sha: str | None = None,
 ) -> FileContext:
     """Parse the repo file at `path` and extract module/class/imports context.
 
@@ -154,12 +204,12 @@ def extract_file_context(
         # Lazy import so python-only runs don't pay tree-sitter startup.
         from .file_context_java import extract_java_file_context
         return extract_java_file_context(
-            repo, path, func_name=func_name, code=code, max_imports=max_imports
+            repo, path, func_name=func_name, code=code, max_imports=max_imports, sha=sha
         )
     if language != "python":
         raise ValueError(f"Unsupported language for file context: {language!r}")
 
-    parsed = _parse(repo, path)
+    parsed = _parse(repo, path, sha)
     if parsed is None:
         return FileContext(language="python", module_doc=None, class_name=None, class_doc=None, outer_class_name=None, outer_class_doc=None, imports=[])
     tree, src = parsed
@@ -292,6 +342,7 @@ def extract_file_outline(
     language: str = "python",
     max_chars: int = 4000,
     cutoff_timestamp: str | None = None,
+    sha: str | None = None,
 ) -> str:
     """Return a compact outline of the file suitable for prompt inclusion.
 
@@ -309,7 +360,7 @@ def extract_file_outline(
         bare_exclude = exclude_func_name.split(".")[-1]
 
     if language == "python":
-        parsed = _parse(repo, path)
+        parsed = _parse(repo, path, sha)
         if parsed is not None:
             tree, src = parsed
             blocks = _build_outline_python(tree, src, bare_exclude)
@@ -323,7 +374,10 @@ def extract_file_outline(
 
     if language == "java":
         from .file_context_java import _build_outline_java, _parse as _java_parse
-        root, src = _java_parse(repo, path)
+        parsed = _java_parse(repo, path, sha)
+        if parsed is None:
+            return ""
+        root, src = parsed
         blocks = _build_outline_java(root, src, bare_exclude)
         outline = "\n\n".join(blocks)
         if len(outline) > max_chars:

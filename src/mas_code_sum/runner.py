@@ -68,6 +68,7 @@ def run_experiment(
 
     _batch_supports_gt = "ground_truths" in inspect.signature(method.summarize_batch).parameters
     _batch_supports_blame = "blame_timestamps" in inspect.signature(method.summarize_batch).parameters
+    _batch_supports_blame_sha = "blame_shas" in inspect.signature(method.summarize_batch).parameters
 
     with mlflow.start_run(run_name=method.name):
         mlflow.log_params({
@@ -89,6 +90,7 @@ def run_experiment(
             paths = [s.get("path") for s in samples]
             urls = [s.get("url") for s in samples]
             blame_timestamps = [s.get("latest_blame_timestamp") for s in samples]
+            blame_shas = [s.get("blame_sha") for s in samples]
 
             # Collect predictions across all runs for this project
             project_run_predictions: list[list[str]] = []
@@ -104,6 +106,8 @@ def run_experiment(
                     batch_kwargs["ground_truths"] = references
                 if _batch_supports_blame:
                     batch_kwargs["blame_timestamps"] = blame_timestamps
+                if _batch_supports_blame_sha:
+                    batch_kwargs["blame_shas"] = blame_shas
                 preds = method.summarize_batch(**batch_kwargs)
                 project_run_predictions.append(preds)
                 for sample, pred, ref in zip(samples, preds, references):
