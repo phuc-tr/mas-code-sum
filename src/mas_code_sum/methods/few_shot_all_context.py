@@ -20,8 +20,6 @@ Query block structure:
   Summary: <s>
 """
 
-import logging
-
 from ..enrichers.file_context import (
     _extract_func_name_from_code,
     extract_file_context,
@@ -116,6 +114,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
                 parts.append(rendered)
 
         # File outline: sibling function signatures + first-line docs
+        func_name: str | None = None
         if language in ("python", "java") and project and path:
             func_name = _extract_java_method_name(code) if language == "java" else _extract_func_name_from_code(code)
             outline = extract_file_outline(

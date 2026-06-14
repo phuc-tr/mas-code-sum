@@ -61,6 +61,7 @@ def load_projects(
     split: str = "test",
     max_samples_per_project: int | None = None,
     dataset_version: str = "v1",
+    projects: list[str] | None = None,
 ) -> dict[str, list[dict]]:
     """
     Load samples grouped by repo (project) across the given languages.
@@ -70,27 +71,31 @@ def load_projects(
         split: dataset split to use
         max_samples_per_project: if set, cap the number of samples kept per project
         dataset_version: versioned subdirectory under dataset/ (e.g. "v1", "v2")
+        projects: if set, only include these repos
 
     Returns:
         dict mapping repo -> list of samples
     """
-    projects: dict[str, list[dict]] = defaultdict(list)
+    project_filter = set(projects) if projects is not None else None
+    result: dict[str, list[dict]] = defaultdict(list)
 
     flat_path = _versioned_dir(dataset_version) / f"{split}.jsonl"
     if flat_path.exists():
         lang_set = set(languages) if languages else None
         for sample in _iter_flat_samples(split, dataset_version):
             if lang_set is None or sample.get("language") in lang_set:
-                projects[sample["repo"]].append(sample)
+                if project_filter is None or sample["repo"] in project_filter:
+                    result[sample["repo"]].append(sample)
     else:
         for language in languages:
             for sample in iter_samples(language, split, dataset_version):
-                projects[sample["repo"]].append(sample)
+                if project_filter is None or sample["repo"] in project_filter:
+                    result[language].append(sample)
 
     if max_samples_per_project is not None:
-        projects = {repo: random.sample(samples, min(max_samples_per_project, len(samples))) for repo, samples in projects.items()}
+        result = {repo: random.sample(samples, min(max_samples_per_project, len(samples))) for repo, samples in result.items()}
 
-    return dict(projects)
+    return dict(result)
 
 
 def load_same_project_projects(

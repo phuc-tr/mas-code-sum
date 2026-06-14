@@ -56,7 +56,7 @@ def run_experiment(
         projects = load_same_project_projects(max_samples_per_project=max_samples, projects=projects)
     else:
         print(f"Loading projects for languages: {languages} (dataset {dataset_version})...")
-        projects = load_projects(languages, max_samples_per_project=max_samples, dataset_version=dataset_version)
+        projects = load_projects(languages, max_samples_per_project=max_samples, dataset_version=dataset_version, projects=projects)
     print(f"Found {len(projects)} projects.")
 
     artifact_rows: list[tuple[dict, int, str, str]] = []
@@ -82,6 +82,9 @@ def run_experiment(
         })
         mlflow.set_tag("method", method.name)
         mlflow.set_tag("dataset", dataset)
+
+        if hasattr(method, "validate_projects"):
+            method.validate_projects(list(projects.keys()))
 
         for project, samples in projects.items():
             references = [" ".join(s["docstring_tokens"]) for s in samples]
