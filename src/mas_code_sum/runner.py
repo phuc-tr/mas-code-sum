@@ -16,7 +16,7 @@ mlflow.openai.autolog()
 
 EXPERIMENT_NAME = "code-summarization"
 
-from .data import load_projects, load_same_project_projects
+from .data import load_projects
 from .metrics import compute_metrics
 from .methods.base import BaseSummarizer
 
@@ -26,9 +26,9 @@ def run_experiment(
     languages: list[str] | None = None,
     max_samples: int | None = None,
     num_runs: int = 1,
-    dataset: str = "standard",
     projects: list[str] | None = None,
     dataset_version: str = "v1",
+    tags: dict[str, str] | None = None,
 ) -> None:
     """
     Run a summarization experiment across all projects found in the given languages.
@@ -40,23 +40,14 @@ def run_experiment(
 
     Each sample is summarized `num_runs` times and metrics are averaged across
     runs to reduce variance from stochastic generation.
-
-    Args:
-        dataset: "standard" (language-based) or "same-project"
     """
-    if dataset not in ("standard", "same-project"):
-        raise ValueError(f"Unknown dataset '{dataset}'. Must be 'standard' or 'same-project'.")
-    if dataset == "standard" and not languages:
-        raise ValueError("'languages' is required when dataset='standard'.")
+    if not languages:
+        raise ValueError("'languages' is required.")
 
     mlflow.set_experiment(EXPERIMENT_NAME)
 
-    if dataset == "same-project":
-        print("Loading Same-project dataset...")
-        projects = load_same_project_projects(max_samples_per_project=max_samples, projects=projects)
-    else:
-        print(f"Loading projects for languages: {languages} (dataset {dataset_version})...")
-        projects = load_projects(languages, max_samples_per_project=max_samples, dataset_version=dataset_version, projects=projects)
+    print(f"Loading projects for languages: {languages} (dataset {dataset_version})...")
+    projects = load_projects(languages, max_samples_per_project=max_samples, dataset_version=dataset_version, projects=projects)
     print(f"Found {len(projects)} projects.")
 
     artifact_rows: list[tuple[dict, int, str, str]] = []
@@ -73,7 +64,6 @@ def run_experiment(
     with mlflow.start_run(run_name=method.name):
         mlflow.log_params({
             "method": method.name,
-            "dataset": dataset,
             "dataset_version": dataset_version,
             "languages": str(languages) if dataset == "standard" else "n/a",
             "max_samples_per_project": max_samples or "all",
@@ -81,7 +71,9 @@ def run_experiment(
             **method.params(),
         })
         mlflow.set_tag("method", method.name)
-        mlflow.set_tag("dataset", dataset)
+        mlflow.set_tag("dataset_version", dataset_version)
+        if tags:
+            mlflow.set_tags(tags)
 
         if hasattr(method, "validate_projects"):
             method.validate_projects(list(projects.keys()))

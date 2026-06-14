@@ -1,42 +1,21 @@
 """Abstract base class for summarization methods."""
 
 import asyncio
-import logging
-import os
 import re
-from abc import ABC, abstractmethod
 
-from openai import APIConnectionError, AsyncOpenAI, InternalServerError, OpenAI, RateLimitError
 from tqdm.asyncio import tqdm as atqdm
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-FEATHERLESS_BASE_URL = "https://api.featherless.ai/v1"
-_LLM_TIMEOUT = 60.0
-_LLM_MAX_RETRIES = 3
+from .llm_client import _call_with_rate_limit_retry, make_clients  # re-exported for importers
 
-_RATE_LIMIT_INITIAL_WAIT = 5.0
-_RATE_LIMIT_MAX_RETRIES = 6
+__all__ = [
+    "BaseSummarizer",
+    "strip_code_fences",
+    "extract_summary",
+    "make_clients",
+    "_call_with_rate_limit_retry",
+]
 
-
-def _is_capacity_error(exc: InternalServerError) -> bool:
-    return exc.status_code == 503 or "capacity" in str(exc).lower()
-
-
-async def _call_with_rate_limit_retry(coro_factory):
-    """Call *coro_factory* and await the result, retrying on transient API errors."""
-    wait = _RATE_LIMIT_INITIAL_WAIT
-    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
-        try:
-            return await coro_factory()
-        except (RateLimitError, InternalServerError, APIConnectionError) as exc:
-            if isinstance(exc, InternalServerError) and not _is_capacity_error(exc):
-                raise
-            if attempt == _RATE_LIMIT_MAX_RETRIES:
-                raise
-            logging.warning("%s; retrying in %.0fs (attempt %d/%d)", type(exc).__name__, wait, attempt + 1, _RATE_LIMIT_MAX_RETRIES)
-            await asyncio.sleep(wait)
-            wait = min(wait * 2, 300)
-
+import logging
 _log = logging.getLogger(__name__)
 
 
@@ -48,41 +27,9 @@ def extract_summary(raw: str) -> str:
     return raw[:end].strip()
 
 
-def make_openai_clients() -> tuple[OpenAI, AsyncOpenAI]:
-    """Create sync and async OpenAI clients pointed at OpenRouter."""
-    kwargs = dict(
-        api_key=os.environ["OPENROUTER_API_KEY"],
-        base_url=OPENROUTER_BASE_URL,
-        timeout=_LLM_TIMEOUT,
-        max_retries=_LLM_MAX_RETRIES,
-    )
-    return OpenAI(**kwargs), AsyncOpenAI(**kwargs)
-
-
-def make_featherless_clients() -> tuple[OpenAI, AsyncOpenAI]:
-    """Create sync and async OpenAI clients pointed at Featherless API."""
-    kwargs = dict(
-        api_key=os.environ["FEATHERLESS_API_KEY"],
-        base_url=FEATHERLESS_BASE_URL,
-        timeout=_LLM_TIMEOUT,
-        max_retries=_LLM_MAX_RETRIES,
-    )
-    return OpenAI(**kwargs), AsyncOpenAI(**kwargs)
-
-
-def make_clients(backend: str = "featherless"):
-    """Return OpenAI-compatible clients for the specified backend."""
-    if backend == "openrouter":
-        return make_openai_clients()
-    if backend == "featherless":
-        return make_featherless_clients()
-    raise ValueError(f"Unknown backend: {backend!r}. Choose 'openrouter' or 'featherless'.")
-
-
 def strip_code_fences(text: str) -> str:
     """Remove markdown code fences, triple-quotes, and <think> blocks from LLM output."""
     text = text.strip()
-    # Strip <think>...</think> block (may start with </think> if opening tag was truncated)
     text = re.sub(r"^<think>.*?</think>\s*", "", text, flags=re.DOTALL)
     text = re.sub(r"^</think>\s*", "", text)
     text = re.sub(r"^```[^\n]*\n?", "", text)
@@ -92,15 +39,14 @@ def strip_code_fences(text: str) -> str:
     return text.strip()
 
 
-class BaseSummarizer(ABC):
+class BaseSummarizer:
     """All experiment methods must implement this interface."""
 
     name: str  # used as MLflow run tag and artifact prefix
 
-    @abstractmethod
     def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         """Generate a one-line summary for the given code snippet."""
-        ...
+        raise NotImplementedError
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         """Async version of summarize. Default: run summarize in a thread executor."""

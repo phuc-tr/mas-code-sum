@@ -1,7 +1,6 @@
 method: few_shot_all_context
 
 method_params:
-  model: Qwen/Qwen3-8B
   use_outer_context: true
   use_class_context: true
   max_imports: 0

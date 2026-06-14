@@ -19,31 +19,10 @@ Then for the query:
   Summary: <s>
 """
 
+from ..data import get_metadata_index
+from ..enrichers.repo_context import build_block
 from ..retrievers.base import BaseRetriever
 from .base import BaseSummarizer, make_clients, strip_code_fences
-from .zero_shot_context_enriched import _get_metadata_index
-
-
-def _build_block(
-    code: str,
-    repo: str | None,
-    about: str | None,
-    path: str | None,
-    docstring: str | None,
-) -> str:
-    parts: list[str] = []
-    if repo:
-        parts.append(f"Repository: {repo}")
-    if about:
-        parts.append(f"Repository description: {about}")
-    if path:
-        parts.append(f"File: {path}")
-    parts.append(f"Code:\n{code}")
-    if docstring is not None:
-        parts.append(f"Summary: <s>{docstring}</s>")
-    else:
-        parts.append("Summary: <s>")
-    return "\n".join(parts)
 
 
 class FewShotContextEnrichedSummarizer(BaseSummarizer):
@@ -63,7 +42,7 @@ class FewShotContextEnrichedSummarizer(BaseSummarizer):
         self.example_paths = example_paths
         self.backend = backend
         self.max_concurrency = 10
-        self._client, self._async_client = make_clients(backend)
+        _, self._async_client = make_clients(backend)
 
     def _example_block(self, s: dict) -> str:
         code = " ".join(s["code_tokens"])
@@ -71,15 +50,15 @@ class FewShotContextEnrichedSummarizer(BaseSummarizer):
         repo = s.get("repo")
         about: str | None = None
         if repo:
-            about = _get_metadata_index().get(repo, {}).get("about")
+            about = get_metadata_index().get(repo, {}).get("about")
         path = s.get("path") if self.example_paths else None
-        return _build_block(code, repo, about, path, docstring)
+        return build_block(code, repo, about, path, docstring)
 
     def _query_block(self, code: str, project: str | None, path: str | None) -> str:
         about: str | None = None
         if project:
-            about = _get_metadata_index().get(project, {}).get("about")
-        return _build_block(code, project, about, path, docstring=None)
+            about = get_metadata_index().get(project, {}).get("about")
+        return build_block(code, project, about, path, docstring=None)
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
@@ -88,23 +67,6 @@ class FewShotContextEnrichedSummarizer(BaseSummarizer):
         prompt = "\n\n".join(blocks)
 
         response = await self._async_client.completions.create(
-            model=self.model,
-            prompt=prompt,
-            max_tokens=30,
-            temperature=0.0,
-        )
-        raw = response.choices[0].text or ""
-        end = raw.find("</s>")
-        comment = raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
-        return strip_code_fences(comment)
-
-    def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
-        examples = self.retriever.retrieve(code, language, project=project, path=path)
-        blocks = [self._example_block(s) for s in examples]
-        blocks.append(self._query_block(code, project, path))
-        prompt = "\n\n".join(blocks)
-
-        response = self._client.completions.create(
             model=self.model,
             prompt=prompt,
             max_tokens=30,

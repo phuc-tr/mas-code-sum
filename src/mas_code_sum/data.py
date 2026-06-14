@@ -8,7 +8,23 @@ from typing import Iterator
 
 _BASE_DATASET_DIR = Path(__file__).parents[2] / "dataset"
 LANGUAGES = ["python", "java", "javascript", "go", "php", "ruby"]
-SAME_PROJECT_DIR = _BASE_DATASET_DIR / "Same-project"
+
+_METADATA_PATH = _BASE_DATASET_DIR / "repo_metadata" / "all_repo_metadata.json"
+_METADATA_INDEX: dict[str, dict] | None = None
+
+
+def get_metadata_index() -> dict[str, dict]:
+    """Return repo metadata indexed by repo name (lazy-loaded singleton)."""
+    global _METADATA_INDEX
+    if _METADATA_INDEX is None:
+        with open(_METADATA_PATH) as f:
+            data = json.load(f)
+        index: dict[str, dict] = {}
+        for entries in data.values():
+            for entry in entries:
+                index[entry["repo"]] = {"about": entry.get("about") or "N/A"}
+        _METADATA_INDEX = index
+    return _METADATA_INDEX
 
 
 def _versioned_dir(dataset_version: str) -> Path:
@@ -33,20 +49,6 @@ def _iter_flat_samples(split: str, dataset_version: str) -> Iterator[dict]:
             line = line.strip()
             if line:
                 yield json.loads(line)
-
-
-def iter_same_project_samples(project: str, split: str = "test") -> Iterator[dict]:
-    """Yield samples from dataset/Same-project/{project}/{split}.jsonl."""
-    path = SAME_PROJECT_DIR / project / f"{split}.jsonl"
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                sample = json.loads(line)
-                # Same-project uses "index" instead of "id"
-                if "id" not in sample:
-                    sample["id"] = sample["index"]
-                yield sample
 
 
 def load_samples(language: str, split: str = "test", dataset_version: str = "v1") -> list[dict]:
@@ -98,27 +100,3 @@ def load_projects(
     return dict(result)
 
 
-def load_same_project_projects(
-    split: str = "test",
-    max_samples_per_project: int | None = None,
-    projects: list[str] | None = None,
-) -> dict[str, list[dict]]:
-    """
-    Load Same-project dataset samples grouped by project directory.
-
-    Returns:
-        dict mapping project name -> list of samples
-    """
-    result: dict[str, list[dict]] = {}
-
-    for project_dir in sorted(SAME_PROJECT_DIR.iterdir()):
-        if not project_dir.is_dir():
-            continue
-        if projects is not None and project_dir.name not in projects:
-            continue
-        samples = list(iter_same_project_samples(project_dir.name, split))
-        if max_samples_per_project is not None:
-            samples = random.sample(samples, min(max_samples_per_project, len(samples)))
-        result[project_dir.name] = samples
-
-    return result

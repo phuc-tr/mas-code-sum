@@ -1,12 +1,8 @@
 method: few_shot_llm
 
-method_params:
-  model: meta-llama/Meta-Llama-3.1-8B
-  backend: featherless
-
 retriever: bm25
 retriever_params:
-  n: 10
+  n: 5
 
 languages:
   - python

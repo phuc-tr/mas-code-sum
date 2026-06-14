@@ -1,8 +1,6 @@
 method: few_shot_asap
 
 method_params:
-  model: meta-llama/Meta-Llama-3.1-8B
-  backend: featherless
   use_repo: true
 
 retriever: bm25
@@ -15,3 +13,4 @@ languages:
 
 split: test
 max_samples: null
+num_runs: 1

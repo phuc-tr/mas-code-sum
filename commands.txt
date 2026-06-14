@@ -1,0 +1,64 @@
+# Equivalent commands for deleted YAML configurations
+# Usage: python run_experiment.py <yaml> [--model MODEL] [--backend BACKEND]
+
+# --- few_shot_all_context (root) ---
+# was: few_shot_all_context_llama3.1_8b_bm25.yaml
+python run_experiment.py experiments/few_shot_all_context_bm25.yaml --model meta-llama/Meta-Llama-3.1-8B
+
+# was: few_shot_all_context_llama3.1_8b_instruct.yaml
+python run_experiment.py experiments/few_shot_all_context_bm25.yaml --model meta-llama/llama-3.1-8b-instruct --backend openrouter
+
+# was: few_shot_all_context_llama3.3_70b_instruct.yaml  (note: yaml name was misleading, model was deepseek)
+python run_experiment.py experiments/few_shot_all_context_bm25.yaml --model deepseek/deepseek-chat-v3.1 --backend openrouter
+
+# was: few_shot_all_context_qwen_3_bm25.yaml
+python run_experiment.py experiments/few_shot_all_context_bm25.yaml --model Qwen/Qwen3-8B
+
+# --- few_shot_asap (root) ---
+# was: few_shot_asap_llama3.1_8b_bm25.yaml
+python run_experiment.py experiments/few_shot_asap_bm25.yaml --model meta-llama/Meta-Llama-3.1-8B --backend featherless
+
+# was: few_shot_asap_turbo_8b_bm25.yaml
+python run_experiment.py experiments/few_shot_asap_bm25.yaml --model meta-llama/llama-3.1-8b-instruct
+
+# --- few_shot_context_enriched (root) ---
+# was: few_shot_context_enriched_llama3.1_8b_bm25.yaml
+python run_experiment.py experiments/few_shot_context_enriched_bm25.yaml --model meta-llama/llama-3.1-8b-instruct
+
+# was: few_shot_context_enriched_turbo_bm25.yaml
+python run_experiment.py experiments/few_shot_context_enriched_bm25.yaml --model openai/gpt-3.5-turbo
+
+# --- few_shot_file_context (root) ---
+# was: few_shot_file_context_llama3.1_8b_bm25.yaml
+python run_experiment.py experiments/few_shot_file_context_bm25.yaml --model meta-llama/Meta-Llama-3.1-8B --backend featherless
+
+# --- few_shot_llm (root) ---
+# was: few_shot_llm_llama3.1_8b_bm25.yaml
+python run_experiment.py experiments/few_shot_llm_bm25.yaml --model meta-llama/Meta-Llama-3.1-8B --backend featherless
+
+# was: few_shot_llm_deepseek-v3.1_bm25.yaml
+python run_experiment.py experiments/few_shot_llm_bm25.yaml --model deepseek/deepseek-chat-v3.1 --backend openrouter
+
+# --- zero_shot_llm (root) ---
+# was: zero_shot_llm_llama3.1_8b.yaml
+python run_experiment.py experiments/zero_shot_llm.yaml --model meta-llama/llama-3.1-8b-instruct
+
+# --- v2 ---
+# was: v2/few_shot_llm_llama3.1_8b_bm25.yaml
+python run_experiment.py experiments/v2/few_shot_llm_bm25.yaml --model meta-llama/Meta-Llama-3.1-8B --backend featherless
+
+# --- v3 ---
+# was: v3/few_shot_all_context_llama3.1_8b_bm25.yaml  (n=3)
+python run_experiment.py experiments/v3/few_shot_all_context_bm25_n3.yaml --model meta-llama/Meta-Llama-3.1-8B --backend featherless
+
+# was: v3/few_shot_all_context_llama3.1_8b_instruct.yaml  (projects filter)
+python run_experiment.py experiments/v3/few_shot_all_context_bm25_filtered.yaml --model meta-llama/llama-3.1-8b-instruct --backend openrouter
+
+# was: v3/few_shot_all_context_llama3.3_70b_instruct.yaml  (note: model was deepseek)
+python run_experiment.py experiments/v3/few_shot_all_context_bm25.yaml --model deepseek/deepseek-chat-v3.1 --backend openrouter
+
+# was: v3/few_shot_all_context_qwen_3_bm25.yaml
+python run_experiment.py experiments/v3/few_shot_all_context_bm25.yaml --model Qwen/Qwen3-8B --backend featherless
+
+# was: v3/few_shot_llm_llama3.1_8b_bm25.yaml
+python run_experiment.py experiments/v3/few_shot_llm_bm25.yaml --model meta-llama/Meta-Llama-3.1-8B --backend featherless

@@ -2,9 +2,12 @@
 
 Usage:
     python run_experiment.py experiments/example.yaml
+    python run_experiment.py experiments/few_shot_llm_bm25.yaml --model meta-llama/Meta-Llama-3.1-8B
+    python run_experiment.py experiments/few_shot_llm_bm25.yaml --model deepseek/deepseek-chat-v3.1 --backend openrouter
+    python run_experiment.py experiments/few_shot_llm_bm25.yaml --model Qwen/Qwen3-8B --tag experiment=ablation --tag notes=no_imports
 """
 
-import sys
+import argparse
 import yaml
 
 from src.mas_code_sum.runner import run_experiment
@@ -12,8 +15,15 @@ from src.mas_code_sum.methods import REGISTRY
 from src.mas_code_sum.retrievers import RETRIEVER_REGISTRY
 
 
-def main(config_path: str) -> None:
-    with open(config_path) as f:
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", help="Path to experiment YAML")
+    parser.add_argument("--model", default=None, help="Override method_params.model")
+    parser.add_argument("--backend", default=None, help="Override method_params.backend")
+    parser.add_argument("--tag", metavar="KEY=VALUE", action="append", default=[], help="Set an MLflow tag (repeatable)")
+    args = parser.parse_args()
+
+    with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
     method_key = cfg["method"]
@@ -30,24 +40,32 @@ def main(config_path: str) -> None:
         retriever = RETRIEVER_REGISTRY[retriever_key](**retriever_params)
 
     method_params = cfg.get("method_params", {})
+    if args.model is not None:
+        method_params["model"] = args.model
+    if args.backend is not None:
+        method_params["backend"] = args.backend
     if retriever is not None:
         method_params = {**method_params, "retriever": retriever}
 
     method = REGISTRY[method_key](**method_params)
+
+    tags: dict[str, str] = {}
+    for kv in args.tag:
+        if "=" not in kv:
+            raise ValueError(f"--tag must be KEY=VALUE, got: {kv!r}")
+        k, v = kv.split("=", 1)
+        tags[k] = v
 
     run_experiment(
         method=method,
         languages=cfg.get("languages"),
         max_samples=cfg.get("max_samples"),
         num_runs=cfg.get("num_runs", 1),
-        dataset=cfg.get("dataset", "standard"),
         projects=cfg.get("projects"),
         dataset_version=dataset_version,
+        tags=tags,
     )
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python run_experiment.py <config.yaml>")
-        sys.exit(1)
-    main(sys.argv[1])
+    main()

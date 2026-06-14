@@ -115,7 +115,7 @@ class FewShotAsapSummarizer(BaseSummarizer):
         self.use_dfg = use_dfg
         self.backend = backend
         self.max_concurrency = 2
-        self._client, self._async_client = make_clients(backend)
+        _, self._async_client = make_clients(backend)
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
@@ -148,51 +148,6 @@ class FewShotAsapSummarizer(BaseSummarizer):
             model=self.model,
             prompt=prompt,
             max_tokens=30,
-            temperature=0.0,
-        )
-        raw = response.choices[0].text or ""
-        end = raw.find("</s>")
-        comment = raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
-        return strip_code_fences(comment)
-
-    def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
-        examples = self.retriever.retrieve(code, language, project=project, path=path)
-
-        # Repo context (same block for all examples and the query)
-        repo_ctx: str | None = None
-        if self.use_repo and project:
-            repo_ctx = f"Repository: {project}\nFile: {path or 'unknown'}"
-
-        # DFG loader (only accessed if use_dfg=True)
-        dfg_loader = get_dfg_loader() if self.use_dfg else None
-
-        # Few-shot example blocks (order: repo → id3 → dfg)
-        blocks: list[str] = []
-        for s in examples:
-            ex_code = " ".join(s["code_tokens"])
-            ex_docstring = " ".join(s["docstring_tokens"])
-            ex_func = s.get("func_name")
-            ex_lang = s.get("language", language)
-            ex_dfg: str | None = None
-            if dfg_loader:
-                ex_url = s.get("url", "")
-                ex_dfg = dfg_loader.get(ex_lang, ex_url, split="train") or _NO_DFG
-            block = _build_block(ex_code, ex_lang, ex_func, repo_ctx, ex_dfg, docstring=ex_docstring)
-            blocks.append(block)
-
-        # Query block (order: repo → dfg → id3, matching turbo.py lines 211-220)
-        query_dfg: str | None = None
-        if dfg_loader:
-            query_dfg = dfg_loader.get(language, url or "", split="test") or _NO_DFG
-        query_block = _build_block(code, language, None, repo_ctx, query_dfg, docstring=None, dfg_before_id3=True)
-        blocks.append(query_block)
-
-        prompt = "\n\n".join(blocks)
-
-        response = self._client.completions.create(
-            model=self.model,
-            prompt=prompt,
-            max_tokens=128,
             temperature=0.0,
         )
         raw = response.choices[0].text or ""

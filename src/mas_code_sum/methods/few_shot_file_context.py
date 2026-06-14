@@ -32,8 +32,8 @@ from .base import (
     make_clients,
     strip_code_fences,
 )
-from .few_shot_context_enriched import _build_block
-from .zero_shot_context_enriched import _get_metadata_index
+from ..data import get_metadata_index
+from ..enrichers.repo_context import build_block
 
 
 class FewShotFileContextSummarizer(BaseSummarizer):
@@ -59,7 +59,7 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         self.max_imports = max_imports  # 0 disables imports entirely
         self.backend = backend
         self.max_concurrency = 2
-        self._client, self._async_client = make_clients(backend)
+        _, self._async_client = make_clients(backend)
 
     def _example_block(self, s: dict) -> str:
         code = " ".join(s["code_tokens"])
@@ -67,14 +67,14 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         repo = s.get("repo")
         about: str | None = None
         if repo:
-            about = _get_metadata_index().get(repo, {}).get("about")
+            about = get_metadata_index().get(repo, {}).get("about")
         path = s.get("path") if self.example_paths else None
-        return _build_block(code, repo, about, path, docstring)
+        return build_block(code, repo, about, path, docstring)
 
     def _query_block(self, code: str, language: str, project: str | None, path: str | None, blame_sha: str | None = None) -> str:
         about: str | None = None
         if project:
-            about = _get_metadata_index().get(project, {}).get("about")
+            about = get_metadata_index().get(project, {}).get("about")
 
         # Base block (repo/about/path/code) — identical to few_shot_context_enriched.
         parts: list[str] = []
@@ -117,19 +117,6 @@ class FewShotFileContextSummarizer(BaseSummarizer):
     ) -> str:
         prompt = self.build_prompt(code, language, project, path, blame_sha=blame_sha)
         response = await self._async_client.completions.create(
-            model=self.model,
-            prompt=prompt,
-            max_tokens=30,
-            temperature=0.0,
-        )
-        raw = response.choices[0].text or ""
-        return strip_code_fences(extract_summary(raw))
-
-    def summarize(
-        self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None, blame_sha: str | None = None
-    ) -> str:
-        prompt = self.build_prompt(code, language, project, path, blame_sha=blame_sha)
-        response = self._client.completions.create(
             model=self.model,
             prompt=prompt,
             max_tokens=30,

@@ -16,23 +16,12 @@ class ZeroShotLLMSummarizer(BaseSummarizer):
         self.model = model
         self.max_concurrency = max_concurrency
         self.backend = backend
-        self._client, self._async_client = make_clients(backend)
+        _, self._async_client = make_clients(backend)
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         response = await self._async_client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": PROMPT_TEMPLATE.format(code=code)}],
-            max_tokens=128,
-            temperature=0.0,
-        )
-        return strip_code_fences(response.choices[0].message.content)
-
-    def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "user", "content": PROMPT_TEMPLATE.format(code=code)},
-            ],
             max_tokens=128,
             temperature=0.0,
         )
