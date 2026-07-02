@@ -27,27 +27,32 @@ def run_experiment(
     max_samples: int | None = None,
     num_runs: int = 1,
     projects: list[str] | None = None,
-    dataset_version: str = "v1",
+    dataset: str = "full",
     tags: dict[str, str] | None = None,
+    cli_command: str | None = None,
 ) -> None:
     """
     Run a summarization experiment across all projects found in the given languages.
 
     All runs land in the single "code-summarization" MLflow experiment.
     Each run represents one method invocation, named after the method.
-    Per-project metrics are logged with a "{project}/" prefix; aggregate
-    metrics (no prefix) summarise across all projects.
+    Per-project metrics are logged as rows in the "per_project_metrics.json"
+    table artifact (one row per project, one column per metric); aggregate
+    metrics are logged as top-level run metrics.
 
     Each sample is summarized `num_runs` times and metrics are averaged across
     runs to reduce variance from stochastic generation.
+
+    `cli_command`, if given, is stored as the "cli_command" tag so a run can be
+    reproduced exactly from the MLflow UI.
     """
     if not languages:
         raise ValueError("'languages' is required.")
 
     mlflow.set_experiment(EXPERIMENT_NAME)
 
-    print(f"Loading projects for languages: {languages} (dataset {dataset_version})...")
-    projects = load_projects(languages, max_samples_per_project=max_samples, dataset_version=dataset_version, projects=projects)
+    print(f"Loading projects for languages: {languages} (dataset {dataset})...")
+    projects = load_projects(languages, max_samples_per_project=max_samples, dataset=dataset, projects=projects)
     print(f"Found {len(projects)} projects.")
 
     artifact_rows: list[tuple[dict, int, str, str]] = []
@@ -64,14 +69,16 @@ def run_experiment(
     with mlflow.start_run(run_name=method.name):
         mlflow.log_params({
             "method": method.name,
-            "dataset_version": dataset_version,
-            "languages": str(languages) if dataset == "standard" else "n/a",
+            "dataset": dataset,
+            "languages": str(languages),
             "max_samples_per_project": max_samples or "all",
             "num_runs": num_runs,
             **method.params(),
         })
         mlflow.set_tag("method", method.name)
-        mlflow.set_tag("dataset_version", dataset_version)
+        mlflow.set_tag("dataset", dataset)
+        if cli_command:
+            mlflow.set_tag("cli_command", cli_command)
         if tags:
             mlflow.set_tags(tags)
 
@@ -118,7 +125,10 @@ def run_experiment(
                 for k in run_metrics[0]
             }
             print(f"  [{project}] {avg_metrics}")
-            mlflow.log_metrics({f"{project}/{k}": v for k, v in avg_metrics.items()})
+            mlflow.log_table(
+                {"project": [project], **{k: [v] for k, v in avg_metrics.items()}},
+                artifact_file="per_project_metrics.json",
+            )
 
             all_samples.extend(samples)
             all_references.extend(references)
@@ -137,7 +147,7 @@ def run_experiment(
         mlflow.log_metrics(aggregate)
         mlflow.log_param("num_samples", len(all_samples))
 
-        # Per-set metrics (for datasets with a 'set' field, e.g. v3)
+        # Per-set metrics (for datasets with a 'set' field)
         set_values = [s.get("set") for s in all_samples]
         known_sets = {v for v in set_values if v is not None}
         for set_name in sorted(known_sets):
