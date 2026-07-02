@@ -70,26 +70,17 @@ mas-code-sum/
 │   ├── scripts/
 │   │   ├── parser/                  # DFG extraction modules (Python + Java)
 │   │   └── sitter-libs/             # tree-sitter grammar sources
-│   ├── precompute_dfg.py            # generates dataset/{version}/{lang}/{split}_dfg.json
+│   ├── precompute_dfg.py            # generates dataset/{full,small}/{split}_dfg.json
 │   └── setup_dfg_parser.sh          # one-time parser build
 ├── dataset/
-│   ├── v1/                          # default dataset version (includes DFG files)
-│   │   ├── python/
-│   │   │   ├── train.jsonl
-│   │   │   ├── test.jsonl
-│   │   │   ├── train_dfg.json       # pre-computed DFG context (ASAP)
-│   │   │   └── test_dfg.json
-│   │   └── java/
-│   │       ├── train.jsonl
-│   │       ├── test.jsonl
-│   │       ├── train_dfg.json
-│   │       └── test_dfg.json
-│   └── v2/                          # alternate dataset version
-│       ├── python/
-│       └── java/
+│   ├── full/                        # complete dataset (default)
+│   │   ├── train.jsonl
+│   │   └── test.jsonl
+│   └── small/                       # 4-project subset for fast iteration
+│       ├── train.jsonl
+│       └── test.jsonl
 ├── experiments/
-│   ├── *.yaml                       # experiment configs (v1 by default)
-│   └── v2/                          # configs targeting the v2 dataset
+│   └── *.yaml                       # experiment configs; pass --dataset full|small at run time
 ├── scripts/                         # pipeline utilities
 │   ├── clone_dataset_repos.py       # clone each dataset repo at its recorded sha
 │   ├── check_dataset_traceability.py # verify samples resolve against cloned repos
@@ -129,9 +120,12 @@ mas-code-sum/
 
 ## Dataset
 
-The dataset is organized into versioned subdirectories under `dataset/`. The default version is `v1`, which includes pre-computed DFG context files used by the ASAP method.
+The dataset comes in two variants under `dataset/`, selected via `--dataset` at run time:
 
-Each version contains one directory per language (`python`, `java`) with `train.jsonl` and `test.jsonl` splits.
+- `full` (default) — the complete dataset.
+- `small` — a 4-project subset (`apache/airflow`, `orientechnologies/orientdb`, `newton-physics/newton`, `tamboui/tamboui`) for fast iteration; `test.jsonl` is capped at 50 samples per project, `train.jsonl` keeps all samples for those projects.
+
+Each variant has flat `train.jsonl` and `test.jsonl` splits spanning all languages.
 
 ### Schema
 
@@ -169,6 +163,7 @@ export MLFLOW_TRACKING_URI=http://...
 
 ```bash
 python run_experiment.py experiments/example.yaml
+python run_experiment.py experiments/example.yaml --dataset small   # fast iteration on the 4-project subset
 ```
 
 **Step 3** — Open the MLflow UI to view results:
@@ -189,9 +184,7 @@ retriever: bm25                  # optional; key in RETRIEVER_REGISTRY
 retriever_params:
   n: 10
 
-dataset_version: v1              # dataset subdirectory (default: v1)
-
-languages:                       # language subdirectories to evaluate
+languages:                       # languages to evaluate
   - python
   - java
 
@@ -204,6 +197,8 @@ projects:                        # optional; filter to specific project names
 
 The `retriever` is constructed first and injected into the method via `method_params`. `run_experiment.py` never needs to change when you add new methods or retrievers.
 
+The dataset variant (`full` or `small`) is a CLI flag, not a YAML field — see `--dataset` above.
+
 ### MLflow Tracking
 
 All runs land under the **`code-summarization`** experiment. Each run represents one full method invocation across all projects and is named after the method.
@@ -211,7 +206,7 @@ All runs land under the **`code-summarization`** experiment. Each run represents
 Per-project metrics are logged with a `{project}/` prefix. Aggregate metrics (no prefix) summarise across all projects.
 
 **Params logged per run:**
-- `method`, `dataset`, `dataset_version`, `languages`, `split`, `num_runs`, `num_samples`, `max_samples_per_project`
+- `method`, `dataset`, `languages`, `num_runs`, `num_samples`, `max_samples_per_project`
 - All hyperparameters returned by the method's `params()` method (e.g. `model`, `retriever`, `n_shots`)
 
 **Metrics logged:**
@@ -242,7 +237,7 @@ LLM-based methods call models via OpenRouter or Featherless using the OpenAI-com
 
 ### ASAP Setup
 
-`few_shot_asap` enriches each prompt with a data-flow graph (DFG) derived from the function's AST. The DFG context is pre-computed and stored in `dataset/v1/{language}/{split}_dfg.json` — these files are already committed, so no setup is needed for a standard run.
+`few_shot_asap` enriches each prompt with a data-flow graph (DFG) derived from the function's AST. The DFG context is pre-computed and stored in `dataset/full/{language}/{split}_dfg.json` — these files are already committed, so no setup is needed for a standard run.
 
 To regenerate the DFG files (e.g. after adding new dataset samples):
 
@@ -266,7 +261,7 @@ Options:
 python asap_scripts/precompute_dfg.py --languages python java --splits train test
 ```
 
-Output: `dataset/v1/{language}/{split}_dfg.json` — a `{url: dfg_text}` mapping loaded at runtime by `enrichers/asap/dfg_loader.py`.
+Output: `dataset/full/{language}/{split}_dfg.json` — a `{url: dfg_text}` mapping loaded at runtime by `enrichers/asap/dfg_loader.py`.
 
 ---
 

@@ -5,9 +5,13 @@ Usage:
     python run_experiment.py experiments/few_shot_llm_bm25.yaml --model meta-llama/Meta-Llama-3.1-8B
     python run_experiment.py experiments/few_shot_llm_bm25.yaml --model deepseek/deepseek-chat-v3.1 --backend openrouter
     python run_experiment.py experiments/few_shot_llm_bm25.yaml --model Qwen/Qwen3-8B --tag experiment=ablation --tag notes=no_imports
+    python run_experiment.py experiments/few_shot_llm_bm25.yaml --dataset small
 """
 
 import argparse
+import shlex
+import sys
+
 import yaml
 
 from src.mas_code_sum.runner import run_experiment
@@ -16,10 +20,13 @@ from src.mas_code_sum.retrievers import RETRIEVER_REGISTRY
 
 
 def main() -> None:
+    cli_command = shlex.join(getattr(sys, "orig_argv", sys.argv))
+
     parser = argparse.ArgumentParser()
     parser.add_argument("config", help="Path to experiment YAML")
     parser.add_argument("--model", default=None, help="Override method_params.model")
     parser.add_argument("--backend", default=None, help="Override method_params.backend")
+    parser.add_argument("--dataset", default="full", choices=["full", "small"], help="Dataset variant to load (default: full)")
     parser.add_argument("--tag", metavar="KEY=VALUE", action="append", default=[], help="Set an MLflow tag (repeatable)")
     args = parser.parse_args()
 
@@ -30,13 +37,11 @@ def main() -> None:
     if method_key not in REGISTRY:
         raise ValueError(f"Unknown method '{method_key}'. Available: {list(REGISTRY)}")
 
-    dataset_version = cfg.get("dataset_version", "v1")
-
     retriever = None
     if retriever_key := cfg.get("retriever"):
         if retriever_key not in RETRIEVER_REGISTRY:
             raise ValueError(f"Unknown retriever '{retriever_key}'. Available: {list(RETRIEVER_REGISTRY)}")
-        retriever_params = {"dataset_version": dataset_version, **cfg.get("retriever_params", {})}
+        retriever_params = {"dataset": args.dataset, **cfg.get("retriever_params", {})}
         retriever = RETRIEVER_REGISTRY[retriever_key](**retriever_params)
 
     method_params = cfg.get("method_params", {})
@@ -62,8 +67,9 @@ def main() -> None:
         max_samples=cfg.get("max_samples"),
         num_runs=cfg.get("num_runs", 1),
         projects=cfg.get("projects"),
-        dataset_version=dataset_version,
+        dataset=args.dataset,
         tags=tags,
+        cli_command=cli_command,
     )
 
 

@@ -2,7 +2,7 @@ method: few_shot_llm
 
 retriever: bm25
 retriever_params:
-  n: 10
+  n: 3
 
 languages:
   - python

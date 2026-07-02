@@ -27,13 +27,13 @@ def get_metadata_index() -> dict[str, dict]:
     return _METADATA_INDEX
 
 
-def _versioned_dir(dataset_version: str) -> Path:
-    return _BASE_DATASET_DIR / dataset_version
+def _dataset_dir(dataset: str) -> Path:
+    return _BASE_DATASET_DIR / dataset
 
 
-def iter_samples(language: str, split: str = "test", dataset_version: str = "v1") -> Iterator[dict]:
-    """Yield samples from dataset/{dataset_version}/{language}/{split}.jsonl."""
-    path = _versioned_dir(dataset_version) / language / f"{split}.jsonl"
+def iter_samples(language: str, split: str = "test", dataset: str = "full") -> Iterator[dict]:
+    """Yield samples from dataset/{dataset}/{language}/{split}.jsonl."""
+    path = _dataset_dir(dataset) / language / f"{split}.jsonl"
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -41,9 +41,9 @@ def iter_samples(language: str, split: str = "test", dataset_version: str = "v1"
                 yield json.loads(line)
 
 
-def _iter_flat_samples(split: str, dataset_version: str) -> Iterator[dict]:
-    """Yield samples from a flat dataset/{dataset_version}/{split}.jsonl (e.g. v3)."""
-    path = _versioned_dir(dataset_version) / f"{split}.jsonl"
+def _iter_flat_samples(split: str, dataset: str) -> Iterator[dict]:
+    """Yield samples from a flat dataset/{dataset}/{split}.jsonl."""
+    path = _dataset_dir(dataset) / f"{split}.jsonl"
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -51,18 +51,18 @@ def _iter_flat_samples(split: str, dataset_version: str) -> Iterator[dict]:
                 yield json.loads(line)
 
 
-def load_samples(language: str, split: str = "test", dataset_version: str = "v1") -> list[dict]:
-    flat_path = _versioned_dir(dataset_version) / f"{split}.jsonl"
+def load_samples(language: str, split: str = "test", dataset: str = "full") -> list[dict]:
+    flat_path = _dataset_dir(dataset) / f"{split}.jsonl"
     if flat_path.exists():
-        return [s for s in _iter_flat_samples(split, dataset_version) if s.get("language") == language]
-    return list(iter_samples(language, split, dataset_version))
+        return [s for s in _iter_flat_samples(split, dataset) if s.get("language") == language]
+    return list(iter_samples(language, split, dataset))
 
 
 def load_projects(
     languages: list[str],
     split: str = "test",
     max_samples_per_project: int | None = None,
-    dataset_version: str = "v1",
+    dataset: str = "full",
     projects: list[str] | None = None,
 ) -> dict[str, list[dict]]:
     """
@@ -72,7 +72,7 @@ def load_projects(
         languages: languages to load from
         split: dataset split to use
         max_samples_per_project: if set, cap the number of samples kept per project
-        dataset_version: versioned subdirectory under dataset/ (e.g. "v1", "v2")
+        dataset: dataset subdirectory under dataset/ ("full" or "small")
         projects: if set, only include these repos
 
     Returns:
@@ -81,16 +81,16 @@ def load_projects(
     project_filter = set(projects) if projects is not None else None
     result: dict[str, list[dict]] = defaultdict(list)
 
-    flat_path = _versioned_dir(dataset_version) / f"{split}.jsonl"
+    flat_path = _dataset_dir(dataset) / f"{split}.jsonl"
     if flat_path.exists():
         lang_set = set(languages) if languages else None
-        for sample in _iter_flat_samples(split, dataset_version):
+        for sample in _iter_flat_samples(split, dataset):
             if lang_set is None or sample.get("language") in lang_set:
                 if project_filter is None or sample["repo"] in project_filter:
                     result[sample["repo"]].append(sample)
     else:
         for language in languages:
-            for sample in iter_samples(language, split, dataset_version):
+            for sample in iter_samples(language, split, dataset):
                 if project_filter is None or sample["repo"] in project_filter:
                     result[language].append(sample)
 

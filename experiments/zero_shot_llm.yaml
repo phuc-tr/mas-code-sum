@@ -9,4 +9,4 @@ languages:
   # - ruby
 
 max_samples: null
-num_runs: 3
+num_runs: 1

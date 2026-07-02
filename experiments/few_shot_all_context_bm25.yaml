@@ -3,12 +3,13 @@ method: few_shot_all_context
 method_params:
   use_outer_context: true
   use_class_context: true
+  use_repo: false
   max_imports: 0
   max_file_chars: 4000
 
 retriever: bm25
 retriever_params:
-  n: 10
+  n: 3
 
 languages:
   - java

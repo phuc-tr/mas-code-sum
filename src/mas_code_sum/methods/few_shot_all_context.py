@@ -51,6 +51,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         example_paths: bool = False,
         use_outer_context: bool = True,
         use_class_context: bool = True,
+        use_repo: bool = True,
         max_imports: int = 0,
         max_file_chars: int = 4000,
         backend: str = "featherless",
@@ -60,6 +61,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         self.example_paths = example_paths
         self.use_outer_context = use_outer_context
         self.use_class_context = use_class_context
+        self.use_repo = use_repo
         self.max_imports = max_imports
         self.max_file_chars = max_file_chars
         self.backend = backend
@@ -70,7 +72,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         docstring = " ".join(s["docstring_tokens"])
         repo = s.get("repo")
         about: str | None = None
-        if repo:
+        if repo and self.use_repo:
             about = get_metadata_index().get(repo, {}).get("about")
         path = s.get("path") if self.example_paths else None
         return build_block(code, repo, about, path, docstring)
@@ -85,7 +87,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         blame_sha: str | None = None,
     ) -> str:
         about: str | None = None
-        if project:
+        if project and self.use_repo:
             about = get_metadata_index().get(project, {}).get("about")
 
         parts: list[str] = []
@@ -216,6 +218,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
             "example_paths": self.example_paths,
             "use_outer_context": self.use_outer_context,
             "use_class_context": self.use_class_context,
+            "use_repo": self.use_repo,
             "max_imports": self.max_imports,
             "max_file_chars": self.max_file_chars,
             "backend": self.backend,
