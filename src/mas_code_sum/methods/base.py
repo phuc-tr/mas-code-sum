@@ -5,7 +5,7 @@ import re
 
 from tqdm.asyncio import tqdm as atqdm
 
-from .llm_client import _call_with_rate_limit_retry, make_clients  # re-exported for importers
+from .llm_client import _call_with_rate_limit_retry, get_concurrency, make_clients  # re-exported for importers
 
 __all__ = [
     "BaseSummarizer",
@@ -43,6 +43,14 @@ class BaseSummarizer:
     """All experiment methods must implement this interface."""
 
     name: str  # used as MLflow run tag and artifact prefix
+    backend: str
+
+    @property
+    def max_concurrency(self) -> int:
+        """In-flight request cap, derived from `backend`. Read-only: subclasses
+        must not assign to this — it prevents call sites from silently
+        overriding the concurrency tuned per backend."""
+        return get_concurrency(getattr(self, "backend", None))
 
     def summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
         """Generate a one-line summary for the given code snippet."""
@@ -70,10 +78,8 @@ class BaseSummarizer:
         if urls is None:
             urls = [None] * n
 
-        max_concurrency = getattr(self, "max_concurrency", 32)
-
         async def _gather():
-            sem = asyncio.Semaphore(max_concurrency)
+            sem = asyncio.Semaphore(self.max_concurrency)
 
             async def _one(code, lang, proj, path, url):
                 async with sem:

@@ -12,9 +12,8 @@ class ZeroShotLLMSummarizer(BaseSummarizer):
 
     name = "zero_shot_llm"
 
-    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", max_concurrency: int = 10, backend: str = "featherless"):
+    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", backend: str = "featherless"):
         self.model = model
-        self.max_concurrency = max_concurrency
         self.backend = backend
         _, self._async_client = make_clients(backend)
 

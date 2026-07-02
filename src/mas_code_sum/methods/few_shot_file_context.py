@@ -58,7 +58,6 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         self.use_class_context = use_class_context
         self.max_imports = max_imports  # 0 disables imports entirely
         self.backend = backend
-        self.max_concurrency = 2
         _, self._async_client = make_clients(backend)
 
     def _example_block(self, s: dict) -> str:

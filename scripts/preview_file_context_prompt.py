@@ -69,7 +69,6 @@ def main() -> None:
     method.model = "n/a"
     method.retriever = retriever
     method.example_paths = False
-    method.max_concurrency = 1
     method.use_module_doc = not args.no_module_doc
     method.use_class_context = not args.no_class_context
     method.max_imports = args.max_imports

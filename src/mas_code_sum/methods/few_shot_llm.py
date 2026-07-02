@@ -19,10 +19,9 @@ class FewShotLLMSummarizer(BaseSummarizer):
 
     name = "few_shot_llm"
 
-    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", retriever: BaseRetriever = None, max_concurrency: int = 2, backend: str = "featherless"):
+    def __init__(self, model: str = "meta-llama/llama-3.1-8b-instruct", retriever: BaseRetriever = None, backend: str = "featherless"):
         self.model = model
         self.retriever = retriever
-        self.max_concurrency = max_concurrency
         self.backend = backend
         _, self._async_client = make_clients(backend)
 

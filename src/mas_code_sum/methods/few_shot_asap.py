@@ -114,7 +114,6 @@ class FewShotAsapSummarizer(BaseSummarizer):
         self.use_repo = use_repo
         self.use_dfg = use_dfg
         self.backend = backend
-        self.max_concurrency = 2
         _, self._async_client = make_clients(backend)
 
     async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:

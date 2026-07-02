@@ -63,7 +63,6 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         self.max_imports = max_imports
         self.max_file_chars = max_file_chars
         self.backend = backend
-        self.max_concurrency = 2
         _, self._async_client = make_clients(backend)
 
     def _example_block(self, s: dict) -> str:

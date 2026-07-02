@@ -41,7 +41,6 @@ class FewShotContextEnrichedSummarizer(BaseSummarizer):
         self.retriever = retriever
         self.example_paths = example_paths
         self.backend = backend
-        self.max_concurrency = 10
         _, self._async_client = make_clients(backend)
 
     def _example_block(self, s: dict) -> str:

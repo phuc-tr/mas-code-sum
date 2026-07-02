@@ -14,6 +14,19 @@ _LLM_MAX_RETRIES = 3
 _RATE_LIMIT_INITIAL_WAIT = 5.0
 _RATE_LIMIT_MAX_RETRIES = 6
 
+# Per-backend concurrency ceilings. OpenRouter tolerates higher parallelism;
+# Featherless rate-limits aggressively, so we stay conservative there.
+_CONCURRENCY_BY_BACKEND = {
+    "openrouter": 10,
+    "featherless": 2,
+}
+_DEFAULT_CONCURRENCY = 2
+
+
+def get_concurrency(backend: str | None) -> int:
+    """Max concurrent in-flight requests for *backend*. Not user-configurable."""
+    return _CONCURRENCY_BY_BACKEND.get(backend, _DEFAULT_CONCURRENCY)
+
 
 def _is_capacity_error(exc: InternalServerError) -> bool:
     return exc.status_code == 503 or "capacity" in str(exc).lower()
