@@ -1,3 +1,5 @@
+from .agentic_rag import AgenticRagSummarizer
+from .agentic_rag_all_context import AgenticRagAllContextSummarizer
 from .codet5_summarizer import CodeT5Summarizer
 from .exact_copy import ExactCopySummarizer
 from .few_shot_all_context import FewShotAllContextSummarizer
@@ -9,6 +11,8 @@ from .zero_shot_context_enriched import ZeroShotContextEnrichedSummarizer
 from .zero_shot_llm import ZeroShotLLMSummarizer
 
 REGISTRY = {
+    "agentic_rag": AgenticRagSummarizer,
+    "agentic_rag_all_context": AgenticRagAllContextSummarizer,
     "exact_copy": ExactCopySummarizer,
     "zero_shot_llm": ZeroShotLLMSummarizer,
     "zero_shot_context_enriched": ZeroShotContextEnrichedSummarizer,

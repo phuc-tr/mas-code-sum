@@ -14,9 +14,18 @@ _METADATA_INDEX: dict[str, dict] | None = None
 
 
 def get_metadata_index() -> dict[str, dict]:
-    """Return repo metadata indexed by repo name (lazy-loaded singleton)."""
+    """Return repo metadata indexed by repo name (lazy-loaded singleton).
+
+    `all_repo_metadata.json` is a generated artifact under the gitignored
+    `dataset/` dir and may not be present in every environment. It only
+    supplies the optional "Repository description" prompt line, so a missing
+    file degrades to no descriptions rather than failing the run.
+    """
     global _METADATA_INDEX
     if _METADATA_INDEX is None:
+        if not _METADATA_PATH.exists():
+            _METADATA_INDEX = {}
+            return _METADATA_INDEX
         with open(_METADATA_PATH) as f:
             data = json.load(f)
         index: dict[str, dict] = {}
