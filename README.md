@@ -76,7 +76,7 @@ mas-code-sum/
 │   ├── full/                        # complete dataset (default)
 │   │   ├── train.jsonl
 │   │   └── test.jsonl
-│   └── small/                       # 4-project subset for fast iteration
+│   └── small/                       # 6-project subset for fast iteration
 │       ├── train.jsonl
 │       └── test.jsonl
 ├── experiments/
@@ -123,7 +123,7 @@ mas-code-sum/
 The dataset comes in two variants under `dataset/`, selected via `--dataset` at run time:
 
 - `full` (default) — the complete dataset.
-- `small` — a 4-project subset (`apache/airflow`, `orientechnologies/orientdb`, `newton-physics/newton`, `tamboui/tamboui`) for fast iteration; `test.jsonl` is capped at 50 samples per project, `train.jsonl` keeps all samples for those projects.
+- `small` — a 6-project subset (`apache/airflow`, `orientechnologies/orientdb`, `google/adk-java`, `newton-physics/newton`, `google/langextract`, `tamboui/tamboui`) for fast iteration; `test.jsonl` is capped at 50 samples per project, `train.jsonl` keeps all samples for those projects.
 
 Each variant has flat `train.jsonl` and `test.jsonl` splits spanning all languages.
 
@@ -147,11 +147,13 @@ Each sample in a `.jsonl` file is a JSON object with these fields:
 
 ## Running Experiments
 
-**Step 1** — Start the MLflow tracking server:
+**Step 1** — Start the MLflow tracking server (Docker):
 
 ```bash
-mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
+docker compose -f docker-compose.mlflow.yml up -d
 ```
+
+This serves the UI/API at `http://127.0.0.1:5000`, backed by `sqlite:///mlflow-data/mlflow.db` with artifacts under `./mlflow-data/mlartifacts` (both gitignored, persisted on the host).
 
 Override the tracking URI if using a remote server:
 
@@ -163,13 +165,13 @@ export MLFLOW_TRACKING_URI=http://...
 
 ```bash
 python run_experiment.py experiments/example.yaml
-python run_experiment.py experiments/example.yaml --dataset small   # fast iteration on the 4-project subset
+python run_experiment.py experiments/example.yaml --dataset small   # fast iteration on the 6-project subset
 ```
 
-**Step 3** — Open the MLflow UI to view results:
+**Step 3** — Open `http://127.0.0.1:5000` in a browser to view results. Stop the server with:
 
 ```bash
-mlflow ui --backend-store-uri sqlite:///mlflow.db
+docker compose -f docker-compose.mlflow.yml down
 ```
 
 ### Experiment Config
