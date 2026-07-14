@@ -17,8 +17,10 @@ mlflow.openai.autolog()
 EXPERIMENT_NAME = "code-summarization"
 
 from .data import load_projects
+from .methods.llm_client import cost_tracker
 from .metrics import compute_metrics
 from .methods.base import BaseSummarizer
+from .rtc import DEFAULT_BACKWARD_BACKEND, compute_rtc_scores_sync
 
 
 def run_experiment(
@@ -30,6 +32,8 @@ def run_experiment(
     dataset: str = "full",
     tags: dict[str, str] | None = None,
     cli_command: str | None = None,
+    rtc_model: str | None = None,
+    rtc_backend: str = DEFAULT_BACKWARD_BACKEND,
 ) -> None:
     """
     Run a summarization experiment across all projects found in the given languages.
@@ -45,6 +49,11 @@ def run_experiment(
 
     `cli_command`, if given, is stored as the "cli_command" tag so a run can be
     reproduced exactly from the MLflow UI.
+
+    `rtc_model`, if given, additionally computes round-trip correctness (see
+    `rtc.py`) using this model for the backward (description -> code) pass,
+    logged as the `rtc_bleu` metric alongside `bleu`/`rougeL`. Left as None,
+    no backward-pass calls are made and no `rtc_bleu` metric is logged.
     """
     if not languages:
         raise ValueError("'languages' is required.")
@@ -55,18 +64,21 @@ def run_experiment(
     projects = load_projects(languages, max_samples_per_project=max_samples, dataset=dataset, projects=projects)
     print(f"Found {len(projects)} projects.")
 
-    artifact_rows: list[tuple[dict, int, str, str]] = []
+    artifact_rows: list[tuple[dict, int, str, str, dict | None]] = []
 
     all_samples: list[dict] = []
     all_references: list[str] = []
     # per-sample predictions accumulated across runs: index -> list[str]
     all_predictions_by_run: list[list[str]] = []
+    # per-sample rtc detail dicts accumulated across runs: index -> list[dict] (only populated if rtc_model is set)
+    all_rtc_detail_by_run: list[list[dict]] = []
 
     _batch_supports_gt = "ground_truths" in inspect.signature(method.summarize_batch).parameters
     _batch_supports_blame = "blame_timestamps" in inspect.signature(method.summarize_batch).parameters
     _batch_supports_blame_sha = "blame_shas" in inspect.signature(method.summarize_batch).parameters
 
     with mlflow.start_run(run_name=method.name):
+        cost_tracker.reset()
         mlflow.log_params({
             "method": method.name,
             "dataset": dataset,
@@ -81,6 +93,8 @@ def run_experiment(
             mlflow.set_tag("cli_command", cli_command)
         if tags:
             mlflow.set_tags(tags)
+        if rtc_model:
+            mlflow.log_params({"rtc_model": rtc_model, "rtc_backend": rtc_backend})
 
         if hasattr(method, "validate_projects"):
             method.validate_projects(list(projects.keys()))
@@ -96,6 +110,7 @@ def run_experiment(
 
             # Collect predictions across all runs for this project
             project_run_predictions: list[list[str]] = []
+            project_run_rtc_detail: list[list[dict]] = []
             for run_idx in range(num_runs):
                 batch_kwargs = dict(
                     codes=codes,
@@ -112,14 +127,21 @@ def run_experiment(
                     batch_kwargs["blame_shas"] = blame_shas
                 preds = method.summarize_batch(**batch_kwargs)
                 project_run_predictions.append(preds)
-                for sample, pred, ref in zip(samples, preds, references):
-                    artifact_rows.append((sample, run_idx, pred, ref))
+                rtc_detail = compute_rtc_scores_sync(samples, preds, rtc_model, rtc_backend) if rtc_model else None
+                if rtc_detail is not None:
+                    project_run_rtc_detail.append(rtc_detail)
+                for i, (sample, pred, ref) in enumerate(zip(samples, preds, references)):
+                    artifact_rows.append((sample, run_idx, pred, ref, rtc_detail[i] if rtc_detail else None))
 
             # Average metrics across runs
             run_metrics = [
                 compute_metrics(preds, references)
                 for preds in project_run_predictions
             ]
+            if rtc_model:
+                for m, detail in zip(run_metrics, project_run_rtc_detail):
+                    for key in _RTC_METRIC_KEYS:
+                        m[key] = sum(d[key] for d in detail) / len(detail)
             avg_metrics = {
                 k: sum(m[k] for m in run_metrics) / num_runs
                 for k in run_metrics[0]
@@ -133,12 +155,19 @@ def run_experiment(
             all_samples.extend(samples)
             all_references.extend(references)
             all_predictions_by_run.extend(zip(*project_run_predictions))
+            if rtc_model:
+                all_rtc_detail_by_run.extend(zip(*project_run_rtc_detail))
 
         # Aggregate across all samples: average metrics per run, then average across runs
         aggregate_run_metrics = [
             compute_metrics([preds[run_idx] for preds in all_predictions_by_run], all_references)
             for run_idx in range(num_runs)
         ]
+        if rtc_model:
+            for run_idx, m in enumerate(aggregate_run_metrics):
+                for key in _RTC_METRIC_KEYS:
+                    scores = [s[run_idx][key] for s in all_rtc_detail_by_run]
+                    m[key] = sum(scores) / len(scores)
         aggregate = {
             k: sum(m[k] for m in aggregate_run_metrics) / num_runs
             for k in aggregate_run_metrics[0]
@@ -157,6 +186,11 @@ def run_experiment(
                 compute_metrics([all_predictions_by_run[i][run_idx] for i in indices], set_refs)
                 for run_idx in range(num_runs)
             ]
+            if rtc_model:
+                for run_idx, m in enumerate(set_run_metrics):
+                    for key in _RTC_METRIC_KEYS:
+                        scores = [all_rtc_detail_by_run[i][run_idx][key] for i in indices]
+                        m[key] = sum(scores) / len(scores)
             set_metrics = {
                 f"{k}_{set_name}": sum(m[k] for m in set_run_metrics) / num_runs
                 for k in set_run_metrics[0]
@@ -164,22 +198,40 @@ def run_experiment(
             print(f"  [set={set_name}] {set_metrics}")
             mlflow.log_metrics(set_metrics)
         _log_predictions_artifact(artifact_rows)
+        mlflow.log_metric("cost_usd", cost_tracker.total)
 
 
-def _log_predictions_artifact(rows: list[tuple[dict, int, str, str]]) -> None:
-    """Write a CSV of (id, project, func_name, run, reference, prediction) and log as MLflow artifact."""
+_RTC_METRIC_KEYS = [
+    "rtc_bleu", "rtc_codebleu", "codebleu_ngram_match", "codebleu_weighted_ngram_match",
+    "codebleu_syntax_match", "codebleu_dataflow_match",
+]
+_RTC_FIELDS = [*_RTC_METRIC_KEYS, "backward_code", "og_code_compared", "rtc_code_compared"]
+
+
+def _log_predictions_artifact(rows: list[tuple[dict, int, str, str, dict | None]]) -> None:
+    """Write a CSV of (id, project, func_name, run, reference, prediction) -- plus,
+    when RTC was computed, rtc_bleu and the exact strings BLEU compared -- and log
+    it as an MLflow artifact."""
+    has_rtc = any(detail is not None for *_, detail in rows)
+    fieldnames = ["id", "project", "func_name", "run", "reference", "prediction"]
+    if has_rtc:
+        fieldnames += _RTC_FIELDS
+
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=["id", "project", "func_name", "run", "reference", "prediction"])
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
     writer.writeheader()
-    for sample, run_idx, pred, ref in rows:
-        writer.writerow({
+    for sample, run_idx, pred, ref, rtc_detail in rows:
+        row = {
             "id": sample["id"],
             "project": sample["repo"],
             "func_name": sample["func_name"],
             "run": run_idx,
             "reference": ref,
             "prediction": pred,
-        })
+        }
+        if has_rtc:
+            row.update({k: (rtc_detail or {}).get(k, "") for k in _RTC_FIELDS})
+        writer.writerow(row)
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         f.write(buf.getvalue())

@@ -10,6 +10,9 @@ resolution-markers = [
     "python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+overrides = [{ name = "tree-sitter", specifier = ">=0.25.2" }]
+
 [[package]]
 name = "absl-py"
 version = "2.4.0"
@@ -364,6 +367,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/27/fb/576f067976d320f5f0114a8d9fa1215425441bb35627b1993e5afd8111e5/cloudpickle-3.1.2.tar.gz", hash = "sha256:7fda9eb655c9c230dab534f1983763de5835249750e85fbcef43aaa30a9a2414", size = 22330, upload-time = "2025-11-03T09:25:26.604Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl", hash = "sha256:9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a", size = 22228, upload-time = "2025-11-03T09:25:25.534Z" },
+]
+
+[[package]]
+name = "codebleu"
+version = "0.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "setuptools" },
+    { name = "tree-sitter" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/45/87298d89e206d88ce83c5d1c36d3d5bcd4eb0fcd64cfcd36adf58b844093/codebleu-0.7.0.tar.gz", hash = "sha256:6f379d5cd1663e1d248ee79d9b23d043c6bc6b60bd03fb106472bae77d2285c3", size = 177961, upload-time = "2024-05-30T10:32:09.033Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/44/888354a4cc9376e3ddc26ed5ed765e2ede0dcdba37ea7b71411b9dab90d2/codebleu-0.7.0-py3-none-any.whl", hash = "sha256:e664e21cf407a355a726fd5af05e0021d8a162f28999281d907d4e7b36c54873", size = 31656, upload-time = "2024-05-30T10:31:58.717Z" },
 ]
 
 [[package]]
@@ -1423,6 +1439,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "astchunk" },
     { name = "bert-score" },
+    { name = "codebleu" },
     { name = "datasets" },
     { name = "dotenv" },
     { name = "langdetect" },
@@ -1455,6 +1472,7 @@ dev = [
 requires-dist = [
     { name = "astchunk", specifier = ">=0.1.0" },
     { name = "bert-score", specifier = ">=0.3.13" },
+    { name = "codebleu", specifier = ">=0.7.0" },
     { name = "datasets", specifier = ">=4.8.4" },
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "langdetect", specifier = ">=1.0.9" },

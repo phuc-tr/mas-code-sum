@@ -21,6 +21,7 @@ dependencies = [
     "tree-sitter-java>=0.23.5",
     "bert-score>=0.3.13",
     "astchunk>=0.1.0",
+    "codebleu>=0.7.0",
     "tqdm>=4.67.3",
     "python-dotenv>=1.2.2",
     "tabulate>=0.10.0",
@@ -34,3 +35,10 @@ dev = [
     "ipykernel>=7.2.0",
     "pygithub>=2.9.0",
 ]
+
+[tool.uv]
+# codebleu==0.7.0 pins tree-sitter<0.23.0, which conflicts with the >=0.25.2
+# this project needs elsewhere (astchunk, tree-sitter-{python,java}). Verified
+# codebleu works fine against tree-sitter 0.25.2 at runtime -- its pin is just
+# conservative, so override it project-wide.
+override-dependencies = ["tree-sitter>=0.25.2"]

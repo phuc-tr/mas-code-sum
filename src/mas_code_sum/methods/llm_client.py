@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import threading
 
 from openai import APIConnectionError, AsyncOpenAI, InternalServerError, OpenAI, RateLimitError
 
@@ -48,6 +49,69 @@ async def _call_with_rate_limit_retry(coro_factory):
             wait = min(wait * 2, 300)
 
 
+class CostTracker:
+    """Accumulates actual USD spend reported by OpenRouter's usage accounting.
+
+    OpenRouter returns the exact, post-discount dollar cost of each generation
+    in `response.usage.cost` when the request opts in via `extra_body={"usage":
+    {"include": True}}`. Token-count-based estimates can't reproduce
+    per-model/provider pricing (and promos), so this is the only accurate source.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._total = 0.0
+
+    def add(self, amount: float) -> None:
+        with self._lock:
+            self._total += amount
+
+    def reset(self) -> None:
+        with self._lock:
+            self._total = 0.0
+
+    @property
+    def total(self) -> float:
+        with self._lock:
+            return self._total
+
+
+cost_tracker = CostTracker()
+
+
+def _record_cost(response):
+    usage = getattr(response, "usage", None)
+    cost = getattr(usage, "cost", None) if usage is not None else None
+    if cost is not None:
+        cost_tracker.add(cost)
+    return response
+
+
+def _enable_usage_accounting(client: OpenAI, async_client: AsyncOpenAI) -> None:
+    """Patch both clients' `chat.completions.create` to request and record OpenRouter cost."""
+
+    def _with_usage_accounting(extra_body):
+        extra_body = dict(extra_body or {})
+        extra_body.setdefault("usage", {"include": True})
+        return extra_body
+
+    orig_create = client.chat.completions.create
+
+    def create(*args, **kwargs):
+        kwargs["extra_body"] = _with_usage_accounting(kwargs.get("extra_body"))
+        return _record_cost(orig_create(*args, **kwargs))
+
+    client.chat.completions.create = create
+
+    orig_async_create = async_client.chat.completions.create
+
+    async def async_create(*args, **kwargs):
+        kwargs["extra_body"] = _with_usage_accounting(kwargs.get("extra_body"))
+        return _record_cost(await orig_async_create(*args, **kwargs))
+
+    async_client.chat.completions.create = async_create
+
+
 def make_openai_clients() -> tuple[OpenAI, AsyncOpenAI]:
     kwargs = dict(
         api_key=os.environ["OPENROUTER_API_KEY"],
@@ -55,7 +119,9 @@ def make_openai_clients() -> tuple[OpenAI, AsyncOpenAI]:
         timeout=_LLM_TIMEOUT,
         max_retries=_LLM_MAX_RETRIES,
     )
-    return OpenAI(**kwargs), AsyncOpenAI(**kwargs)
+    client, async_client = OpenAI(**kwargs), AsyncOpenAI(**kwargs)
+    _enable_usage_accounting(client, async_client)
+    return client, async_client
 
 
 def make_featherless_clients() -> tuple[OpenAI, AsyncOpenAI]:

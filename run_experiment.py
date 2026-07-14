@@ -28,6 +28,11 @@ def main() -> None:
     parser.add_argument("--backend", default=None, help="Override method_params.backend")
     parser.add_argument("--dataset", default="full", choices=["full", "small"], help="Dataset variant to load (default: full)")
     parser.add_argument("--tag", metavar="KEY=VALUE", action="append", default=[], help="Set an MLflow tag (repeatable)")
+    parser.add_argument(
+        "--rtc", metavar="MODEL", default=None,
+        help="Backward model to use for round-trip correctness (RTC). If omitted, the rtc_bleu metric is not computed.",
+    )
+    parser.add_argument("--rtc-backend", default="openrouter", help="Backend for the RTC backward model (default: openrouter)")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -70,6 +75,8 @@ def main() -> None:
         dataset=args.dataset,
         tags=tags,
         cli_command=cli_command,
+        rtc_model=args.rtc,
+        rtc_backend=args.rtc_backend,
     )
 
 
