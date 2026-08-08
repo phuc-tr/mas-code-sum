@@ -202,8 +202,8 @@ def run_experiment(
 
 
 _RTC_METRIC_KEYS = [
-    "rtc_bleu", "rtc_codebleu", "codebleu_ngram_match", "codebleu_weighted_ngram_match",
-    "codebleu_syntax_match", "codebleu_dataflow_match",
+    "rtc_bleu", "rtc_crystalbleu", "rtc_codebleu", "codebleu_ngram_match",
+    "codebleu_weighted_ngram_match", "codebleu_syntax_match", "codebleu_dataflow_match",
 ]
 _RTC_FIELDS = [*_RTC_METRIC_KEYS, "backward_code", "og_code_compared", "rtc_code_compared"]
 

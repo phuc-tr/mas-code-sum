@@ -509,6 +509,15 @@ wheels = [
 ]
 
 [[package]]
+name = "crystalbleu"
+version = "0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/f9/e57c344501790f8638f9662edeff7de95b7e00d61ed41805b5c018e04bab/crystalbleu-0.2.tar.gz", hash = "sha256:883a745259a69cf3b089044ed375702e57bcdc00b3f2454842ca6f7f9b900b8e", size = 12047, upload-time = "2026-01-19T11:08:30.014Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/22/25/fa83423e31c5b3ec2199a716c87467df7e12d8822145774d5269ca0b53e9/crystalbleu-0.2-py2.py3-none-any.whl", hash = "sha256:0eb9c47ee0bb953faec0e9017e732188d0297026da669d1b7942b0a1c3e4ef58", size = 12584, upload-time = "2026-01-19T11:08:28.859Z" },
+]
+
+[[package]]
 name = "cuda-bindings"
 version = "13.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1440,6 +1449,7 @@ dependencies = [
     { name = "astchunk" },
     { name = "bert-score" },
     { name = "codebleu" },
+    { name = "crystalbleu" },
     { name = "datasets" },
     { name = "dotenv" },
     { name = "langdetect" },
@@ -1473,6 +1483,7 @@ requires-dist = [
     { name = "astchunk", specifier = ">=0.1.0" },
     { name = "bert-score", specifier = ">=0.3.13" },
     { name = "codebleu", specifier = ">=0.7.0" },
+    { name = "crystalbleu", specifier = ">=0.2" },
     { name = "datasets", specifier = ">=4.8.4" },
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "langdetect", specifier = ">=1.0.9" },

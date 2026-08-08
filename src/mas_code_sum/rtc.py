@@ -5,9 +5,9 @@ Code LLMs with Round-Trip Correctness" (ICML 2024): a *backward* model is
 asked to reconstruct the original function from the *forward* prediction
 (the description under test), spliced back into the source file in place of
 the function (fill-in-the-middle). The reconstruction is then compared to the
-original code with smoothed BLEU-4 -- a system whose descriptions round-trip
-to more similar code is producing summaries that better capture the code's
-actual behavior.
+original code with smoothed BLEU-4, CrystalBLEU, and CodeBLEU -- a system
+whose descriptions round-trip to more similar code is producing summaries
+that better capture the code's actual behavior.
 
 Ported from `scratch/roundtrip_correctness.ipynb`; see that notebook for the
 full derivation and validation against multiple systems.
@@ -18,13 +18,19 @@ from __future__ import annotations
 import ast
 import asyncio
 import re
+from collections import Counter
 
 from codebleu import AVAILABLE_LANGS, calc_codebleu
+from crystalbleu import SmoothingFunction, sentence_bleu as _crystal_sentence_bleu
+from nltk.util import ngrams as _nltk_ngrams
 from tqdm.asyncio import tqdm as atqdm
 
 from .enrichers.file_context import _load_source
-from .evaluator import bleu as _bleu
+from .evaluator import bleu as _bleu, normalize as _tokenize
 from .methods.llm_client import _call_with_rate_limit_retry, get_concurrency, make_clients
+
+CRYSTALBLEU_K = 500  # trivially shared n-grams to exclude, per Eghbali & Pradel (2022)
+_CRYSTALBLEU_SMOOTHING = SmoothingFunction().method1
 
 DEFAULT_BACKWARD_BACKEND = "openrouter"
 BACKWARD_TEMPERATURE = 0.2
@@ -226,6 +232,43 @@ def build_backward_prompt(row: dict) -> str:
     )
 
 
+def build_trivially_shared_ngrams(code_samples: list[str], k: int = CRYSTALBLEU_K) -> dict:
+    """Frequency table of the `k` most common 1..4-grams across `code_samples`,
+    tokenized the same way as `rtc_bleu`/CrystalBLEU below.
+
+    CrystalBLEU (Eghbali & Pradel, 2022) excludes these from n-gram matching:
+    they're boilerplate common to almost any snippet in the language (`) :`,
+    `self .`, `return`, ...) that inflates plain-BLEU-style scores without
+    reflecting real similarity between two specific snippets. Built once per
+    RTC run from all original functions being evaluated (typically per
+    language, since boilerplate differs across languages), not per-pair --
+    the whole point is to capture corpus-wide boilerplate rather than overfit
+    to a single comparison.
+    """
+    frequencies = Counter()
+    for code in code_samples:
+        tokens = _tokenize(code)
+        for n in range(1, 5):
+            frequencies.update(_nltk_ngrams(tokens, n))
+    return dict(frequencies.most_common(k))
+
+
+def crystalbleu_score(original_code: str, backward_code: str, trivially_shared_ngrams: dict) -> float:
+    """CrystalBLEU (Eghbali & Pradel, 2022) between original and round-tripped
+    code, 0-100 scale. Same n-gram precision machinery as BLEU, but ignores
+    `trivially_shared_ngrams` (the corpus's most common n-grams) when
+    matching, so language boilerplate shared by nearly all snippets doesn't
+    inflate the score -- more discriminative than plain BLEU for ranking
+    reconstructions against each other.
+    """
+    ref_tokens = _tokenize(original_code)
+    hyp_tokens = _tokenize(backward_code)
+    score = _crystal_sentence_bleu(
+        [ref_tokens], hyp_tokens, smoothing_function=_CRYSTALBLEU_SMOOTHING, ignoring=trivially_shared_ngrams
+    )
+    return float(score) * 100
+
+
 def codebleu_score(original_code: str, backward_code: str, language: str) -> dict:
     """CodeBLEU (Ren et al., 2020) between original and round-tripped code, 0-100 scale.
 
@@ -249,11 +292,11 @@ def codebleu_score(original_code: str, backward_code: str, language: str) -> dic
     }
 
 
-def rtc_compare(original_code: str, backward_code: str, language: str) -> dict:
+def rtc_compare(original_code: str, backward_code: str, language: str, trivially_shared_ngrams: dict) -> dict:
     """Normalize both sides (strip doc comments, decorators, imports) and score
-    with smoothed corpus-style BLEU-4 and CodeBLEU, 0-100 scale. Returns the
-    exact strings BLEU compares alongside the scores, so callers can inspect
-    what was actually diffed.
+    with smoothed corpus-style BLEU-4, CrystalBLEU, and CodeBLEU, 0-100 scale.
+    Returns the exact strings compared alongside the scores, so callers can
+    inspect what was actually diffed.
 
     Normalization happens first: the backward model is prompted from the
     description alone, so an original docstring restating that same
@@ -265,15 +308,11 @@ def rtc_compare(original_code: str, backward_code: str, language: str) -> dict:
     rtc_code_compared = normalize_for_rtc_comparison(backward_code, language)
     return {
         "rtc_bleu": _bleu([og_code_compared], rtc_code_compared)[0] * 100,
+        "rtc_crystalbleu": crystalbleu_score(og_code_compared, rtc_code_compared, trivially_shared_ngrams),
         "og_code_compared": og_code_compared,
         "rtc_code_compared": rtc_code_compared,
         **codebleu_score(og_code_compared, rtc_code_compared, language),
     }
-
-
-def rtc_bleu(original_code: str, backward_code: str, language: str) -> float:
-    """Smoothed corpus-style BLEU-4 between original and round-tripped code, 0-100 scale."""
-    return rtc_compare(original_code, backward_code, language)["rtc_bleu"]
 
 
 async def compute_rtc_scores(
@@ -287,12 +326,19 @@ async def compute_rtc_scores(
     `samples` items need: code, language, repo, path, blame_sha (as loaded by
     `data.load_projects`). One backward-model call per sample.
 
-    Each returned dict has: rtc_bleu (float), og_code_compared and
-    rtc_code_compared (the exact post-docstring-strip strings BLEU compared),
+    Each returned dict has: rtc_bleu, rtc_crystalbleu (floats), og_code_compared
+    and rtc_code_compared (the exact post-docstring-strip strings compared),
     and backward_code (the raw fence-stripped model output, pre-docstring-strip).
     """
     _, async_client = make_clients(backend)
     sem = asyncio.Semaphore(get_concurrency(backend))
+
+    codes_by_language: dict[str, list[str]] = {}
+    for sample in samples:
+        codes_by_language.setdefault(sample["language"], []).append(sample["code"])
+    trivially_shared_ngrams_by_language = {
+        language: build_trivially_shared_ngrams(codes) for language, codes in codes_by_language.items()
+    }
 
     async def _one(sample: dict, prediction: str) -> dict:
         row = {
@@ -318,7 +364,10 @@ async def compute_rtc_scores(
         backward_code = strip_code_fence(response.choices[0].message.content or "")
         return {
             "backward_code": backward_code,
-            **rtc_compare(sample["code"], backward_code, sample["language"]),
+            **rtc_compare(
+                sample["code"], backward_code, sample["language"],
+                trivially_shared_ngrams_by_language[sample["language"]],
+            ),
         }
 
     return list(await atqdm.gather(
