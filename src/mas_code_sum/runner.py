@@ -76,6 +76,7 @@ def run_experiment(
     _batch_supports_gt = "ground_truths" in inspect.signature(method.summarize_batch).parameters
     _batch_supports_blame = "blame_timestamps" in inspect.signature(method.summarize_batch).parameters
     _batch_supports_blame_sha = "blame_shas" in inspect.signature(method.summarize_batch).parameters
+    _batch_supports_func_names = "func_names" in inspect.signature(method.summarize_batch).parameters
 
     with mlflow.start_run(run_name=method.name):
         cost_tracker.reset()
@@ -107,6 +108,9 @@ def run_experiment(
             urls = [s.get("url") for s in samples]
             blame_timestamps = [s.get("latest_blame_timestamp") for s in samples]
             blame_shas = [s.get("blame_sha") for s in samples]
+            # Dataset-qualified 'Class.method' — disambiguates same-named methods
+            # across nested/sibling classes when resolving the enclosing class.
+            func_names = [s.get("func_name") for s in samples]
 
             # Collect predictions across all runs for this project
             project_run_predictions: list[list[str]] = []
@@ -125,6 +129,8 @@ def run_experiment(
                     batch_kwargs["blame_timestamps"] = blame_timestamps
                 if _batch_supports_blame_sha:
                     batch_kwargs["blame_shas"] = blame_shas
+                if _batch_supports_func_names:
+                    batch_kwargs["func_names"] = func_names
                 preds = method.summarize_batch(**batch_kwargs)
                 project_run_predictions.append(preds)
                 rtc_detail = compute_rtc_scores_sync(samples, preds, rtc_model, rtc_backend) if rtc_model else None

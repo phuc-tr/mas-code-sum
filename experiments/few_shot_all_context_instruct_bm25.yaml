@@ -1,0 +1,20 @@
+method: few_shot_all_context_instruct
+
+method_params:
+  use_outer_context: true
+  use_class_context: true
+  use_repo: false
+  max_imports: 0
+  max_file_chars: 4000
+
+retriever: bm25
+retriever_params:
+  n: 3
+
+languages:
+  - java
+  - python
+
+split: test
+max_samples: null
+num_runs: 1

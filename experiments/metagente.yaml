@@ -1,0 +1,17 @@
+method: metagente
+
+method_params:
+  model: meta-llama/llama-3.1-8b-instruct
+  teacher_model: meta-llama/llama-3.3-70b-instruct
+  backend: openrouter
+  num_train_samples: 20
+  max_iterations: 10
+  rouge_threshold: 0.7
+  pool_languages: true
+
+languages:
+  - python
+  - java
+
+max_samples: null
+num_runs: 1

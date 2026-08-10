@@ -10,7 +10,6 @@ extra signals from the actual file at `dataset/repos/{repo}/{path}`:
 
   Java:
     - enclosing class name + Javadoc
-    - top-level class name + Javadoc (outer context, only when method is nested)
     - top-of-file imports
 
 Query block:
@@ -70,7 +69,7 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         path = s.get("path") if self.example_paths else None
         return build_block(code, repo, about, path, docstring)
 
-    def _query_block(self, code: str, language: str, project: str | None, path: str | None, blame_sha: str | None = None) -> str:
+    def _query_block(self, code: str, language: str, project: str | None, path: str | None, blame_sha: str | None = None, func_name: str | None = None) -> str:
         about: str | None = None
         if project:
             about = get_metadata_index().get(project, {}).get("about")
@@ -87,13 +86,12 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         # File-level context for supported languages; only when we can locate the file.
         if language in ("python", "java") and project and path:
             ctx = extract_file_context(
-                project, path, code=code, max_imports=self.max_imports, language=language, sha=blame_sha
+                project, path, func_name=func_name, code=code,
+                max_imports=self.max_imports, language=language, sha=blame_sha
             )
             # Apply per-field gates before rendering.
             if not self.use_outer_context:
                 ctx.module_doc = None          # Python
-                ctx.outer_class_name = None    # Java nested-class outer context
-                ctx.outer_class_doc = None
             if not self.use_class_context:
                 ctx.class_name = None
                 ctx.class_doc = None
@@ -105,16 +103,16 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         parts.append("Summary: <s>")
         return "\n".join(parts)
 
-    def build_prompt(self, code: str, language: str, project: str | None, path: str | None, blame_sha: str | None = None) -> str:
+    def build_prompt(self, code: str, language: str, project: str | None, path: str | None, blame_sha: str | None = None, func_name: str | None = None) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
         blocks = [self._example_block(s) for s in examples]
-        blocks.append(self._query_block(code, language, project, path, blame_sha=blame_sha))
+        blocks.append(self._query_block(code, language, project, path, blame_sha=blame_sha, func_name=func_name))
         return "\n\n".join(blocks)
 
     async def async_summarize(
-        self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None, blame_sha: str | None = None
+        self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None, blame_sha: str | None = None, func_name: str | None = None
     ) -> str:
-        prompt = self.build_prompt(code, language, project, path, blame_sha=blame_sha)
+        prompt = self.build_prompt(code, language, project, path, blame_sha=blame_sha, func_name=func_name)
         response = await self._async_client.completions.create(
             model=self.model,
             prompt=prompt,
@@ -132,6 +130,7 @@ class FewShotFileContextSummarizer(BaseSummarizer):
         paths: list[str | None] | None = None,
         urls: list[str | None] | None = None,
         blame_shas: list[str | None] | None = None,
+        func_names: list[str | None] | None = None,
     ) -> list[str]:
         import asyncio
         from tqdm.asyncio import tqdm as atqdm
@@ -145,20 +144,22 @@ class FewShotFileContextSummarizer(BaseSummarizer):
             urls = [None] * n
         if blame_shas is None:
             blame_shas = [None] * n
+        if func_names is None:
+            func_names = [None] * n
 
         sem = asyncio.Semaphore(self.max_concurrency)
 
         async def _gather():
-            async def _one(code, lang, proj, path, url, blame_sha):
+            async def _one(code, lang, proj, path, url, blame_sha, func_name):
                 async with sem:
                     return await _call_with_rate_limit_retry(
-                        lambda: self.async_summarize(code, lang, project=proj, path=path, url=url, blame_sha=blame_sha)
+                        lambda: self.async_summarize(code, lang, project=proj, path=path, url=url, blame_sha=blame_sha, func_name=func_name)
                     )
 
             return await atqdm.gather(*[
-                _one(code, lang, proj, path, url, blame_sha)
-                for code, lang, proj, path, url, blame_sha
-                in zip(codes, languages, projects, paths, urls, blame_shas)
+                _one(code, lang, proj, path, url, blame_sha, func_name)
+                for code, lang, proj, path, url, blame_sha, func_name
+                in zip(codes, languages, projects, paths, urls, blame_shas, func_names)
             ], desc="samples")
 
         return list(asyncio.run(_gather()))

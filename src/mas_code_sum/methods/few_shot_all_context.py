@@ -77,7 +77,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         path = s.get("path") if self.example_paths else None
         return build_block(code, repo, about, path, docstring)
 
-    def _query_block(
+    def _context_parts(
         self,
         code: str,
         language: str,
@@ -85,7 +85,14 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         path: str | None,
         blame_timestamp: str | None = None,
         blame_sha: str | None = None,
-    ) -> str:
+        func_name: str | None = None,
+    ) -> list[str]:
+        """Repo/file/outline context lines for *code*, excluding the code block itself.
+
+        Split out from `_query_block` so other methods (e.g. the context-gated
+        summarizer) can inspect exactly what extra context would be injected,
+        without duplicating this logic.
+        """
         about: str | None = None
         if project and self.use_repo:
             about = get_metadata_index().get(project, {}).get("about")
@@ -101,12 +108,11 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         # File-level context (module doc, enclosing class, imports)
         if language in ("python", "java") and project and path:
             ctx = extract_file_context(
-                project, path, code=code, max_imports=self.max_imports, language=language, sha=blame_sha
+                project, path, func_name=func_name, code=code,
+                max_imports=self.max_imports, language=language, sha=blame_sha
             )
             if not self.use_outer_context:
                 ctx.module_doc = None
-                ctx.outer_class_name = None
-                ctx.outer_class_doc = None
             if not self.use_class_context:
                 ctx.class_name = None
                 ctx.class_doc = None
@@ -115,13 +121,14 @@ class FewShotAllContextSummarizer(BaseSummarizer):
                 parts.append(rendered)
 
         # File outline: sibling function signatures + first-line docs
-        func_name: str | None = None
         if language in ("python", "java") and project and path:
-            func_name = _extract_java_method_name(code) if language == "java" else _extract_func_name_from_code(code)
+            exclude = func_name or (
+                _extract_java_method_name(code) if language == "java" else _extract_func_name_from_code(code)
+            )
             outline = extract_file_outline(
                 project,
                 path,
-                exclude_func_name=func_name,
+                exclude_func_name=exclude,
                 language=language,
                 max_chars=self.max_file_chars,
                 cutoff_timestamp=blame_timestamp,
@@ -129,6 +136,19 @@ class FewShotAllContextSummarizer(BaseSummarizer):
             if outline:
                 parts.append(f"Other functions in file:\n{outline}")
 
+        return parts
+
+    def _query_block(
+        self,
+        code: str,
+        language: str,
+        project: str | None,
+        path: str | None,
+        blame_timestamp: str | None = None,
+        blame_sha: str | None = None,
+        func_name: str | None = None,
+    ) -> str:
+        parts = self._context_parts(code, language, project, path, blame_timestamp=blame_timestamp, blame_sha=blame_sha, func_name=func_name)
         parts.append(f"Code:\n{code}")
         parts.append("Summary: <s>")
         return "\n".join(parts)
@@ -141,10 +161,11 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         path: str | None,
         blame_timestamp: str | None = None,
         blame_sha: str | None = None,
+        func_name: str | None = None,
     ) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
         blocks = [self._example_block(s) for s in examples]
-        blocks.append(self._query_block(code, language, project, path, blame_timestamp=blame_timestamp, blame_sha=blame_sha))
+        blocks.append(self._query_block(code, language, project, path, blame_timestamp=blame_timestamp, blame_sha=blame_sha, func_name=func_name))
         return "\n\n".join(blocks)
 
     async def async_summarize(
@@ -156,8 +177,9 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         url: str | None = None,
         blame_timestamp: str | None = None,
         blame_sha: str | None = None,
+        func_name: str | None = None,
     ) -> str:
-        prompt = self.build_prompt(code, language, project, path, blame_timestamp=blame_timestamp, blame_sha=blame_sha)
+        prompt = self.build_prompt(code, language, project, path, blame_timestamp=blame_timestamp, blame_sha=blame_sha, func_name=func_name)
         response = await self._async_client.completions.create(
             model=self.model,
             prompt=prompt,
@@ -177,6 +199,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
         ground_truths: list[str | None] | None = None,
         blame_timestamps: list[str | None] | None = None,
         blame_shas: list[str | None] | None = None,
+        func_names: list[str | None] | None = None,
     ) -> list[str]:
         import asyncio
         from tqdm.asyncio import tqdm as atqdm
@@ -192,20 +215,22 @@ class FewShotAllContextSummarizer(BaseSummarizer):
             blame_timestamps = [None] * n
         if blame_shas is None:
             blame_shas = [None] * n
+        if func_names is None:
+            func_names = [None] * n
 
         async def _gather():
             sem = asyncio.Semaphore(self.max_concurrency)
 
-            async def _one(code, lang, proj, path, url, blame_ts, blame_sha):
+            async def _one(code, lang, proj, path, url, blame_ts, blame_sha, func_name):
                 async with sem:
                     return await _call_with_rate_limit_retry(
-                        lambda: self.async_summarize(code, lang, proj, path, url, blame_timestamp=blame_ts, blame_sha=blame_sha)
+                        lambda: self.async_summarize(code, lang, proj, path, url, blame_timestamp=blame_ts, blame_sha=blame_sha, func_name=func_name)
                     )
 
             return await atqdm.gather(*[
-                _one(code, lang, proj, path, url, blame_ts, blame_sha)
-                for code, lang, proj, path, url, blame_ts, blame_sha
-                in zip(codes, languages, projects, paths, urls, blame_timestamps, blame_shas)
+                _one(code, lang, proj, path, url, blame_ts, blame_sha, func_name)
+                for code, lang, proj, path, url, blame_ts, blame_sha, func_name
+                in zip(codes, languages, projects, paths, urls, blame_timestamps, blame_shas, func_names)
             ], desc="samples")
 
         return list(asyncio.run(_gather()))

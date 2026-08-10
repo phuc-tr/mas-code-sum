@@ -17,7 +17,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-DATASET_DIR = Path(__file__).parents[3] / "dataset" / "full"
+DATASET_DIR = Path(__file__).parents[4] / "dataset" / "full"
 
 
 class DFGLoader:

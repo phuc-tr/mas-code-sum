@@ -1,0 +1,12 @@
+method: few_shot_llm
+
+retriever: bm25_cross_project
+retriever_params:
+  n: 3
+
+languages:
+  - python
+  - java
+
+max_samples: null
+num_runs: 1

@@ -9,6 +9,9 @@ from openai import APIConnectionError, AsyncOpenAI, InternalServerError, OpenAI,
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 FEATHERLESS_BASE_URL = "https://api.featherless.ai/v1"
+
+# Restrict OpenRouter requests to these upstream providers only (no fallback to others).
+OPENROUTER_ALLOWED_PROVIDERS = ["Novita", "DeepInfra", "openai", "azure"]
 _LLM_TIMEOUT = 60.0
 _LLM_MAX_RETRIES = 3
 
@@ -87,29 +90,44 @@ def _record_cost(response):
     return response
 
 
+def _with_openrouter_extra_body(extra_body):
+    extra_body = dict(extra_body or {})
+    extra_body.setdefault("usage", {"include": True})
+    provider = dict(extra_body.get("provider") or {})
+    provider.setdefault("order", OPENROUTER_ALLOWED_PROVIDERS)
+    provider.setdefault("allow_fallbacks", False)
+    extra_body["provider"] = provider
+    return extra_body
+
+
 def _enable_usage_accounting(client: OpenAI, async_client: AsyncOpenAI) -> None:
-    """Patch both clients' `chat.completions.create` to request and record OpenRouter cost."""
+    """Patch both clients' `chat.completions.create` and `completions.create` to
+    request/record OpenRouter cost and restrict requests to the allowed providers."""
 
-    def _with_usage_accounting(extra_body):
-        extra_body = dict(extra_body or {})
-        extra_body.setdefault("usage", {"include": True})
-        return extra_body
+    for target_client in (client, async_client):
+        orig_chat_create = target_client.chat.completions.create
+        orig_create = target_client.completions.create
+        is_async = target_client is async_client
 
-    orig_create = client.chat.completions.create
+        if is_async:
+            async def chat_create(*args, _orig=orig_chat_create, **kwargs):
+                kwargs["extra_body"] = _with_openrouter_extra_body(kwargs.get("extra_body"))
+                return _record_cost(await _orig(*args, **kwargs))
 
-    def create(*args, **kwargs):
-        kwargs["extra_body"] = _with_usage_accounting(kwargs.get("extra_body"))
-        return _record_cost(orig_create(*args, **kwargs))
+            async def create(*args, _orig=orig_create, **kwargs):
+                kwargs["extra_body"] = _with_openrouter_extra_body(kwargs.get("extra_body"))
+                return _record_cost(await _orig(*args, **kwargs))
+        else:
+            def chat_create(*args, _orig=orig_chat_create, **kwargs):
+                kwargs["extra_body"] = _with_openrouter_extra_body(kwargs.get("extra_body"))
+                return _record_cost(_orig(*args, **kwargs))
 
-    client.chat.completions.create = create
+            def create(*args, _orig=orig_create, **kwargs):
+                kwargs["extra_body"] = _with_openrouter_extra_body(kwargs.get("extra_body"))
+                return _record_cost(_orig(*args, **kwargs))
 
-    orig_async_create = async_client.chat.completions.create
-
-    async def async_create(*args, **kwargs):
-        kwargs["extra_body"] = _with_usage_accounting(kwargs.get("extra_body"))
-        return _record_cost(await orig_async_create(*args, **kwargs))
-
-    async_client.chat.completions.create = async_create
+        target_client.chat.completions.create = chat_create
+        target_client.completions.create = create
 
 
 def make_openai_clients() -> tuple[OpenAI, AsyncOpenAI]:

@@ -12,8 +12,6 @@ Python:
 
 Java (delegated to file_context_java.py):
   - class_name / class_doc: enclosing class name and Javadoc
-  - outer_class_name / outer_class_doc: top-level class name and Javadoc,
-    only set when the method lives in a nested/inner class (differs from enclosing)
   - imports: top-level import statements
   - module_doc is always None (Java has no file-level docstring)
 
@@ -43,17 +41,13 @@ class FileContext:
     # Direct enclosing class of the target function (Python and Java).
     class_name: str | None
     class_doc: str | None
-    # Java only: the top-level class, set only when the method lives in a
-    # nested/inner class (i.e. outer_class_name != class_name). Always None for Python.
-    outer_class_name: str | None
-    outer_class_doc: str | None
     imports: list[str]
 
     def is_empty(self) -> bool:
         if self.language == "python":
             return not (self.module_doc or self.class_name or self.imports)
         else:
-            return not (self.class_name or self.outer_class_name or self.imports)
+            return not (self.class_name or self.imports)
 
 
 def _repo_dir(repo: str) -> Path:
@@ -156,14 +150,26 @@ def _extract_func_name_from_code(code: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _find_enclosing_class(tree: ast.Module, target_name: str) -> ast.ClassDef | None:
-    """Return the ClassDef directly containing a function named target_name, or None."""
+def _find_enclosing_class(tree: ast.Module, target_name: str, qualifier: str | None = None) -> ast.ClassDef | None:
+    """Return the ClassDef directly containing a function named target_name, or None.
+
+    Several classes in one file can define the same method name, so when
+    qualifier is given prefer the class whose name matches it; otherwise fall
+    back to the first match in walk order."""
+    candidates: list[ast.ClassDef] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == target_name:
-                    return node
-    return None
+                    candidates.append(node)
+                    break
+    if not candidates:
+        return None
+    if qualifier:
+        for cls in candidates:
+            if cls.name == qualifier:
+                return cls
+    return candidates[0]
 
 
 def _collect_imports(tree: ast.Module, src: str, max_imports: int) -> list[str]:
@@ -211,7 +217,7 @@ def extract_file_context(
 
     parsed = _parse(repo, path, sha)
     if parsed is None:
-        return FileContext(language="python", module_doc=None, class_name=None, class_doc=None, outer_class_name=None, outer_class_doc=None, imports=[])
+        return FileContext(language="python", module_doc=None, class_name=None, class_doc=None, imports=[])
     tree, src = parsed
 
     module_doc = ast.get_docstring(tree)
@@ -223,8 +229,10 @@ def extract_file_context(
     class_name: str | None = None
     class_doc: str | None = None
     if func_name:
-        bare = func_name.split(".")[-1]
-        cls = _find_enclosing_class(tree, bare)
+        parts = func_name.split(".")
+        bare = parts[-1]
+        qualifier = parts[-2] if len(parts) > 1 else None
+        cls = _find_enclosing_class(tree, bare, qualifier)
         if cls is not None:
             class_name = cls.name
             class_doc = ast.get_docstring(cls)
@@ -236,8 +244,6 @@ def extract_file_context(
         module_doc=module_doc.strip() if module_doc else None,
         class_name=class_name,
         class_doc=class_doc.strip() if class_doc else None,
-        outer_class_name=None,
-        outer_class_doc=None,
         imports=imports,
     )
 
@@ -251,7 +257,7 @@ def render_file_context(
 
     Labels are language-specific:
       Python: "Module docstring:", "Enclosing class:"
-      Java:   "Top-level class:" (outer, nested case only), "Class:" / "Enclosing class:"
+      Java:   "Class:"
     """
     parts: list[str] = []
 
@@ -270,15 +276,8 @@ def render_file_context(
             parts.append(line)
 
     else:  # java
-        # When the method is in a nested class, show the outer (top-level) class first.
-        if ctx.outer_class_name:
-            line = f"Top-level class: {ctx.outer_class_name}"
-            if ctx.outer_class_doc:
-                line += f" — {_truncate(ctx.outer_class_doc, max_class_doc_chars)}"
-            parts.append(line)
         if ctx.class_name:
-            label = "Enclosing class" if ctx.outer_class_name else "Class"
-            line = f"{label}: {ctx.class_name}"
+            line = f"Class: {ctx.class_name}"
             if ctx.class_doc:
                 line += f" — {_truncate(ctx.class_doc, max_class_doc_chars)}"
             parts.append(line)

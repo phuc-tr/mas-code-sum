@@ -30,6 +30,17 @@ class BM25Retriever(BaseRetriever):
         ranked = sorted(range(len(samples)), key=lambda i: scores[i], reverse=True)
 
         if project is not None:
-            ranked = [i for i in ranked if samples[i]["repo"] == project]
+            ranked = [i for i in ranked if self._keep(samples[i], project)]
 
         return [samples[i] for i in ranked[:k]]
+
+    def _keep(self, sample: dict, project: str) -> bool:
+        """Whether a candidate sample should be considered, given the query's own project."""
+        return sample["repo"] == project
+
+
+class BM25CrossProjectRetriever(BM25Retriever):
+    """Retrieve samples ranked by BM25 score, excluding samples from the query's own project."""
+
+    def _keep(self, sample: dict, project: str) -> bool:
+        return sample["repo"] != project

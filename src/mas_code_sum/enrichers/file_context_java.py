@@ -3,10 +3,6 @@
 Java-specific signals (no forced mapping to Python concepts):
   - class_name / class_doc   -> direct enclosing class of the target method
                                 and its Javadoc
-  - outer_class_name /
-    outer_class_doc          -> top-level class name and Javadoc, set only
-                                when the method is in a nested/inner class
-                                (i.e. outer != enclosing)
   - imports                  -> top-level `import ...;` statements
   - module_doc               -> always None (Java has no file-level docstring)
 """
@@ -120,30 +116,35 @@ def _preceding_javadoc(node: Node, src: bytes) -> str | None:
     return None
 
 
-def _find_top_level_class(root: Node) -> Node | None:
-    for ch in root.children:
-        if ch.type == "class_declaration":
-            return ch
-    return None
-
-
-def _find_enclosing_class(root: Node, target_method: str) -> Node | None:
+def _find_enclosing_class(root: Node, target_method: str, qualifier: str | None = None) -> Node | None:
     """Walk the tree; return the class_declaration that directly contains a
-    method_declaration named target_method."""
-    def walk(node: Node, current_class: Node | None) -> Node | None:
+    method_declaration named target_method.
+
+    Several classes in one file can declare the same bare method name (e.g. a
+    nested Builder and its outer class both declaring connect()). When
+    qualifier is given, prefer the class whose name matches it; otherwise fall
+    back to the first match in pre-order."""
+    candidates: list[Node] = []
+
+    def walk(node: Node, current_class: Node | None) -> None:
         if node.type == "class_declaration":
             current_class = node
         if node.type == "method_declaration":
             name = node.child_by_field_name("name")
-            if name is not None and name.text.decode() == target_method:
-                return current_class
+            if name is not None and name.text.decode() == target_method and current_class is not None:
+                candidates.append(current_class)
         for c in node.children:
-            found = walk(c, current_class)
-            if found is not None:
-                return found
-        return None
+            walk(c, current_class)
 
-    return walk(root, None)
+    walk(root, None)
+    if not candidates:
+        return None
+    if qualifier:
+        for cls in candidates:
+            name_node = cls.child_by_field_name("name")
+            if name_node is not None and name_node.text.decode() == qualifier:
+                return cls
+    return candidates[0]
 
 
 def _collect_imports(root: Node, src: bytes, max_imports: int) -> list[str]:
@@ -242,7 +243,7 @@ def extract_java_file_context(
     parsed = _parse(repo, path, sha)
     if parsed is None:
         return FileContext(language="java", module_doc=None, class_name=None, class_doc=None,
-                           outer_class_name=None, outer_class_doc=None, imports=[])
+                           imports=[])
     root, src = parsed
 
     if func_name is None and code is not None:
@@ -250,28 +251,18 @@ def extract_java_file_context(
 
     class_name: str | None = None
     class_doc: str | None = None
-    outer_class_name: str | None = None
-    outer_class_doc: str | None = None
 
     if func_name:
-        bare = func_name.split(".")[-1]
-        cls = _find_enclosing_class(root, bare)
+        parts = func_name.split(".")
+        bare = parts[-1]
+        qualifier = parts[-2] if len(parts) > 1 else None
+        cls = _find_enclosing_class(root, bare, qualifier)
         if cls is not None:
             name_node = cls.child_by_field_name("name")
             if name_node is not None:
                 class_name = _text(name_node, src)
             raw_doc = _preceding_javadoc(cls, src)
             class_doc = raw_doc.strip() if raw_doc else None
-
-            # If the enclosing class is not the top-level class, also capture
-            # the top-level class as outer context.
-            top_cls = _find_top_level_class(root)
-            if top_cls is not None and top_cls is not cls:
-                top_name_node = top_cls.child_by_field_name("name")
-                if top_name_node is not None:
-                    outer_class_name = _text(top_name_node, src)
-                raw_outer = _preceding_javadoc(top_cls, src)
-                outer_class_doc = raw_outer.strip() if raw_outer else None
 
     imports = _collect_imports(root, src, max_imports=max_imports)
 
@@ -280,7 +271,5 @@ def extract_java_file_context(
         module_doc=None,
         class_name=class_name,
         class_doc=class_doc,
-        outer_class_name=outer_class_name,
-        outer_class_doc=outer_class_doc,
         imports=imports,
     )

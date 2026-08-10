@@ -1,0 +1,25 @@
+method: metagente
+
+method_params:
+  model: meta-llama/llama-3.1-8b-instruct
+  teacher_model: meta-llama/llama-3.3-70b-instruct
+  backend: openrouter
+  num_train_samples: 20
+  max_iterations: 10
+  rouge_threshold: 0.7
+  pool_languages: true
+
+# Adds in-context examples ahead of the trained prompt at inference time.
+# Retriever/ICL settings are NOT part of the training-config cache key, so
+# this reuses the same cached prompt as experiments/metagente.yaml without
+# retraining (see MetagenteSummarizer._cache_key).
+retriever: bm25
+retriever_params:
+  n: 3
+
+languages:
+  - python
+  - java
+
+max_samples: null
+num_runs: 1

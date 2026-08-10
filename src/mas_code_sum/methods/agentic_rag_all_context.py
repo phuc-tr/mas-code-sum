@@ -52,17 +52,17 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
         path: str | None,
         blame_timestamp: str | None,
         blame_sha: str | None,
+        func_name: str | None = None,
     ) -> list[str]:
         if language not in ("python", "java") or not project or not path:
             return []
 
         ctx = extract_file_context(
-            project, path, code=code, max_imports=self.max_imports, language=language, sha=blame_sha
+            project, path, func_name=func_name, code=code,
+            max_imports=self.max_imports, language=language, sha=blame_sha
         )
         if not self.use_outer_context:
             ctx.module_doc = None
-            ctx.outer_class_name = None
-            ctx.outer_class_doc = None
         if not self.use_class_context:
             ctx.class_name = None
             ctx.class_doc = None
@@ -72,11 +72,13 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
         if rendered:
             parts.append(rendered)
 
-        func_name = _extract_java_method_name(code) if language == "java" else _extract_func_name_from_code(code)
+        exclude = func_name or (
+            _extract_java_method_name(code) if language == "java" else _extract_func_name_from_code(code)
+        )
         outline = extract_file_outline(
             project,
             path,
-            exclude_func_name=func_name,
+            exclude_func_name=exclude,
             language=language,
             max_chars=self.max_file_chars,
             cutoff_timestamp=blame_timestamp,
@@ -116,6 +118,7 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
         chunks: list[Chunk],
         blame_timestamp: str | None = None,
         blame_sha: str | None = None,
+        func_name: str | None = None,
     ) -> str:
         examples = self.retriever.retrieve(code, language, project=project, path=path)
         sections = [SUMMARIZER_INSTRUCTION]
@@ -125,7 +128,7 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
         if examples:
             sections.append("Here are examples of well-summarized functions:")
             sections.extend(self._example_block(s) for s in examples)
-        sections.extend(self._file_context_parts(code, language, project, path, blame_timestamp, blame_sha))
+        sections.extend(self._file_context_parts(code, language, project, path, blame_timestamp, blame_sha, func_name))
         sections.append(f"Now summarize the following function:\n\nCode:\n{code}")
         sections.append(SUMMARIZER_FINAL_INSTRUCTION)
         return "\n\n".join(sections)
@@ -142,12 +145,13 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
         ground_truth: str | None = None,
         blame_timestamp: str | None = None,
         blame_sha: str | None = None,
+        func_name: str | None = None,
     ) -> str:
         chunks: list[Chunk] = []
         if project:
             chunks = await self._gather_context(code, language, project, ground_truth=ground_truth)
 
-        prompt = self.build_prompt(code, language, project, path, chunks, blame_timestamp, blame_sha)
+        prompt = self.build_prompt(code, language, project, path, chunks, blame_timestamp, blame_sha, func_name)
         response = await self._async_client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
@@ -166,6 +170,7 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
         ground_truths: list[str | None] | None = None,
         blame_timestamps: list[str | None] | None = None,
         blame_shas: list[str | None] | None = None,
+        func_names: list[str | None] | None = None,
     ) -> list[str]:
         import asyncio
         from tqdm.asyncio import tqdm as atqdm
@@ -183,23 +188,25 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
             blame_timestamps = [None] * n
         if blame_shas is None:
             blame_shas = [None] * n
+        if func_names is None:
+            func_names = [None] * n
 
         async def _gather():
             sem = asyncio.Semaphore(self.max_concurrency)
 
-            async def _one(code, lang, proj, path, url, gt, blame_ts, blame_sha):
+            async def _one(code, lang, proj, path, url, gt, blame_ts, blame_sha, func_name):
                 async with sem:
                     return await _call_with_rate_limit_retry(
                         lambda: self.async_summarize(
                             code, lang, project=proj, path=path, url=url, ground_truth=gt,
-                            blame_timestamp=blame_ts, blame_sha=blame_sha,
+                            blame_timestamp=blame_ts, blame_sha=blame_sha, func_name=func_name,
                         )
                     )
 
             return await atqdm.gather(*[
-                _one(code, lang, proj, path, url, gt, blame_ts, blame_sha)
-                for code, lang, proj, path, url, gt, blame_ts, blame_sha
-                in zip(codes, languages, projects, paths, urls, ground_truths, blame_timestamps, blame_shas)
+                _one(code, lang, proj, path, url, gt, blame_ts, blame_sha, func_name)
+                for code, lang, proj, path, url, gt, blame_ts, blame_sha, func_name
+                in zip(codes, languages, projects, paths, urls, ground_truths, blame_timestamps, blame_shas, func_names)
             ], desc="samples")
 
         return list(asyncio.run(_gather()))

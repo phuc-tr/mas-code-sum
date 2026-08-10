@@ -2,6 +2,9 @@ method: few_shot_asap
 
 method_params:
   use_repo: true
+  use_dfg: false
+  use_id: true
+  use_stop_tag: false
 
 retriever: bm25
 retriever_params:
