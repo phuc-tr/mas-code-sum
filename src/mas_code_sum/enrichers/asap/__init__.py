@@ -1,2 +1,2 @@
-from .dfg_loader import DFGLoader, get_dfg_loader
+from .dfg import extract_dataflow, get_dfg_context
 from .identifier_extractor import extract_identifier_context

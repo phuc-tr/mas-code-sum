@@ -43,7 +43,7 @@ RTC cost. See [Results](#results).
   - [Experiment Config](#experiment-config)
   - [MLflow Tracking](#mlflow-tracking)
 - [Methods](#methods)
-  - [ASAP Setup](#asap-setup)
+  - [ASAP DFG context](#asap-dfg-context)
 - [Retrievers](#retrievers)
 - [Round-Trip Correctness (RTC)](#round-trip-correctness-rtc)
 - [Adding a New Method](#adding-a-new-method)
@@ -100,11 +100,8 @@ python scripts/clone_dataset_repos.py
 ```
 mas-code-sum/
 ├── asap_scripts/                    # ASAP DFG parser (CodeXGLUE upstream)
-│   ├── scripts/
-│   │   ├── parser/                  # DFG extraction modules (Python + Java)
-│   │   └── sitter-libs/             # tree-sitter grammar sources
-│   ├── precompute_dfg.py            # generates dataset/{full,small}/{split}_dfg.json
-│   └── setup_dfg_parser.sh          # one-time parser build
+│   └── scripts/
+│       └── parser/                  # DFG extraction modules (Python + Java)
 ├── dataset/
 │   ├── full/                        # complete dataset (default)
 │   │   ├── train.jsonl
@@ -148,7 +145,7 @@ mas-code-sum/
 │   │   └── bm25.py                  # BM25Retriever + BM25CrossProjectRetriever
 │   └── enrichers/
 │       ├── asap/
-│       │   └── dfg_loader.py        # loads pre-computed DFG context from dataset/
+│       │   └── dfg.py               # DFG context, computed on demand
 │       ├── ast_chunks.py            # AST-aware repo chunking (astchunk) for agentic RAG
 │       ├── repo_context.py          # repo name/description metadata
 │       ├── file_context.py          # module doc, class context, imports (Python)
@@ -304,33 +301,11 @@ Logged metrics are aggregates across all projects. Metrics restricted to one con
 
 LLM-based methods call models via OpenRouter or Featherless using the OpenAI-compatible API. Client construction, rate-limit retry, and cost tracking are centralized in `src/mas_code_sum/methods/llm_client.py`. Specify the backend per method with `backend: featherless` or `backend: openrouter` in `method_params`.
 
-### ASAP Setup
+### ASAP DFG context
 
-`few_shot_asap` enriches each prompt with a data-flow graph (DFG) derived from the function's AST. The DFG context is pre-computed and stored in `dataset/full/{language}/{split}_dfg.json` — these files are already committed, so no setup is needed for a standard run.
+`few_shot_asap` can enrich each prompt with a data-flow graph (DFG) derived from the function's AST — set `use_dfg: true` in `method_params`. There is no setup step: `enrichers/asap/dfg.py` computes the block from the source at prompt-build time (~1 ms per function, memoized per process) using the vendored CodeXGLUE parser under `asap_scripts/scripts/parser/`.
 
-To regenerate the DFG files (e.g. after adding new dataset samples):
-
-**Step 1 — Build the tree-sitter parser** (one-time):
-
-```bash
-bash asap_scripts/setup_dfg_parser.sh
-```
-
-This clones the required tree-sitter grammar repos into `asap_scripts/scripts/sitter-libs/` and compiles the parser shared library.
-
-**Step 2 — Pre-compute DFG context**:
-
-```bash
-python asap_scripts/precompute_dfg.py
-```
-
-Options:
-
-```bash
-python asap_scripts/precompute_dfg.py --languages python java --splits train test
-```
-
-Output: `dataset/full/{language}/{split}_dfg.json` — a `{url: dfg_text}` mapping loaded at runtime by `enrichers/asap/dfg_loader.py`.
+The block is byte-identical to what `asap_scripts/scripts/DFG.py` produces, verified across all 13,590 dataset samples.
 
 ---
 

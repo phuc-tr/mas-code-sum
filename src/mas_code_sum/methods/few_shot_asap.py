@@ -23,20 +23,17 @@ Then for the query:
   Write down the original comment written by the developer.
   Comment:
 
-DFG requires pre-computation:
-  bash asap_scripts/setup_dfg_parser.sh
-  python asap_scripts/precompute_dfg.py
+DFG context is computed from the source on demand — see enrichers/asap/dfg.py.
 """
 
 from __future__ import annotations
 
-from ..enrichers.asap.dfg_loader import get_dfg_loader
+from ..enrichers.asap.dfg import get_dfg_context
 from ..enrichers.asap.identifier_extractor import extract_identifier_context
 from ..retrievers.base import BaseRetriever
 from .base import BaseSummarizer, make_clients, strip_code_fences
 
 _COMMENT_PROMPT = "Write down the original comment written by the developer."
-_NO_DFG = "Please find the dataflow of the function. We present the source and list of target indices.\nNo DFG available"
 
 
 def _build_block(
@@ -104,8 +101,8 @@ class FewShotAsapSummarizer(BaseSummarizer):
     use_repo:
         Whether to inject repository name + description into the prompt.
     use_dfg:
-        Whether to inject pre-computed DFG context.
-        Requires running setup_dfg_parser.sh + precompute_dfg.py first.
+        Whether to inject the ASAP data-flow context block. Computed from the
+        function's source at prompt-build time; no setup required.
     use_id:
         Whether to inject the ASAP "id3" identifier-role context block.
     use_stop_tag:
@@ -137,14 +134,13 @@ class FewShotAsapSummarizer(BaseSummarizer):
         self.backend = backend
         _, self._async_client = make_clients(backend)
 
-    async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
+    def build_prompt(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
+        """Assemble the flat ASAP prompt (few-shot blocks + query block)."""
         examples = self.retriever.retrieve(code, language, project=project, path=path)
 
         repo_ctx: str | None = None
         if self.use_repo and project:
             repo_ctx = f"Repository: {project}\nFile: {path or 'unknown'}"
-
-        dfg_loader = get_dfg_loader() if self.use_dfg else None
 
         blocks: list[str] = []
         for s in examples:
@@ -153,36 +149,45 @@ class FewShotAsapSummarizer(BaseSummarizer):
             ex_func = s.get("func_name")
             ex_lang = s.get("language", language)
             ex_dfg: str | None = None
-            if dfg_loader:
-                ex_url = s.get("url", "")
-                ex_dfg = dfg_loader.get(ex_lang, ex_url, split="train") or _NO_DFG
+            if self.use_dfg:
+                # From real source, not the joined tokens the block renders:
+                # tokenization drops indentation and changes the parse.
+                ex_dfg = get_dfg_context(s.get("original_string") or s.get("code") or "", ex_lang)
             blocks.append(_build_block(
                 ex_code, ex_lang, ex_func, repo_ctx, ex_dfg, docstring=ex_docstring,
                 use_id=self.use_id, use_stop_tag=self.use_stop_tag,
             ))
 
         query_dfg: str | None = None
-        if dfg_loader:
-            query_dfg = dfg_loader.get(language, url or "", split="test") or _NO_DFG
+        if self.use_dfg:
+            query_dfg = get_dfg_context(code, language)
         blocks.append(_build_block(
             code, language, None, repo_ctx, query_dfg, docstring=None,
             use_id=self.use_id, use_stop_tag=self.use_stop_tag, dfg_before_id3=True,
         ))
 
-        prompt = "\n\n".join(blocks)
-        response = await self._async_client.completions.create(
-            model=self.model,
-            prompt=prompt,
-            max_tokens=30,
-            temperature=0.0,
-        )
-        raw = response.choices[0].text or ""
+        return "\n\n".join(blocks)
+
+    def parse_reply(self, raw: str) -> str:
+        """Cut the model's continuation down to the single comment line."""
         if self.use_stop_tag:
-            end = raw.find("</s>")
-            comment = raw[:end].strip() if end != -1 else raw.split("\n")[0].strip()
+            start = raw.find("<s>")
+            begin = start + len("<s>") if start != -1 else 0
+            end = raw.find("</s>", begin)
+            comment = raw[begin:end].strip() if end != -1 else raw.split("\n")[0].strip()
         else:
             comment = raw.split("\n")[0].strip()
         return strip_code_fences(comment)
+
+    async def async_summarize(self, code: str, language: str, project: str | None = None, path: str | None = None, url: str | None = None) -> str:
+        prompt = self.build_prompt(code, language, project=project, path=path, url=url)
+        response = await self._async_client.completions.create(
+            model=self.model,
+            prompt=prompt,
+            max_tokens=50,
+            temperature=0.0,
+        )
+        return self.parse_reply(response.choices[0].text or "")
 
     def params(self) -> dict:
         return {
