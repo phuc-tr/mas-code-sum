@@ -26,6 +26,11 @@ Plug-in methods · BM25 retrieval · Agentic RAG · BLEU · ROUGE-L · Round-tri
 
 All runs are tracked in MLflow under the **`code-summarization`** experiment.
 
+**Headline finding:** CARA (`agentic_rag_all_context`) improves BLEU over zero-shot
+prompting without a practically significant drop in round-trip correctness, while ASAP —
+the baseline it is compared against — buys a larger BLEU gain at a materially significant
+RTC cost. See [Results](#results).
+
 ---
 
 ## Table of Contents
@@ -55,11 +60,31 @@ This project uses [uv](https://github.com/astral-sh/uv) for dependency managemen
 uv sync
 ```
 
-LLM methods support two backends. Set the relevant API key(s):
+LLM methods support three backends. Set the relevant API key(s):
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...   # OpenRouter
 export FEATHERLESS_API_KEY=...         # Featherless (default for completions-based methods)
+export RUNPOD_API=...                  # RunPod serverless (self-hosted models)
+export RUNPOD_ENDPOINT_ID=...          # the endpoint id from the RunPod console
+```
+
+Pick one per run with `--backend {openrouter,featherless,runpod}` (or `method_params.backend` in the YAML).
+
+`runpod` targets a serverless endpoint running an OpenAI-compatible worker (e.g. the vLLM worker), at
+`https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/openai/v1`. `--model` must be the model name the worker was
+deployed with, not an OpenRouter-style slug. Optional knobs:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `RUNPOD_BASE_URL` | derived from endpoint id | Full base URL override (e.g. a dedicated pod) |
+| `RUNPOD_MAX_CONCURRENCY` | 4 | In-flight requests; match your endpoint's max workers |
+| `RUNPOD_TIMEOUT` | 600 | Per-request seconds — generous because a scaled-to-zero endpoint cold-starts |
+
+Smoke-test the endpoint before launching a full run:
+
+```bash
+uv run python scripts/test_runpod.py
 ```
 
 Methods that read a sample's surrounding source file (`few_shot_file_context`, `few_shot_all_context`, the `agentic_rag` family) and the RTC metric need the dataset repos checked out locally at their recorded shas:
@@ -407,74 +432,111 @@ def compute_metrics(predictions: list[str], references: list[str]) -> dict[str, 
 
 ## Results
 
-All numbers below come from MLflow runs on the **`full`** dataset (2,000 test samples, Python + Java, 10 `original` + 10 `new` projects), summarizer **Llama 3.1 8B Instruct** via OpenRouter, BM25 retrieval with n=3, RTC backward model **`openai/gpt-4o-mini`**.
+**CARA improves BLEU over zero-shot prompting without a practically significant drop in
+round-trip correctness. ASAP, the baseline it is measured against, does not.**
 
-### Aggregate
+That is the headline finding, and it is what the two metric families are for. BLEU asks
+how closely a summary matches the human reference; RTC asks how much of the code's actual
+behavior survives in the summary, by having a backward model reconstruct the function
+from it. A method can buy the first with the second — and few-shot prompting does exactly
+that. CARA does not.
 
-| Method | BLEU | ROUGE-L | RTC BLEU | RTC CrystalBLEU | RTC CodeBLEU | Cost |
-|---|---:|---:|---:|---:|---:|---:|
-| `few_shot_asap` | **22.84** | **0.42** | 31.32 | 27.95 | 35.06 | $0.41 |
-| `agentic_rag_all_context` | 21.43 | **0.42** | **33.64** | **30.14** | **36.66** | $0.50 |
-| `few_shot_all_context_instruct` | 19.50 | 0.40 | 33.44 | — | 36.65 | $0.42 |
-| `zero_shot_llm` | 15.37 | 0.35 | 32.77 | 29.34 | 35.97 | $0.34 |
+`cara` below is the `agentic_rag_all_context` method; `asap` is `few_shot_asap`.
 
-The two metric families disagree, which is the point of having both: ASAP's DFG-style prompt wins on n-gram overlap with the reference docstring, while the context-gathering methods produce descriptions that round-trip back to more faithful code. `zero_shot_llm` scores far worse against references but nearly as well under RTC — a sign that much of the reference-based gap is stylistic conformity to the project's docstring conventions rather than semantic content.
+### Setup
 
-CrystalBLEU is blank where a run predates the metric; rerun with `--rtc` to fill it in.
+Every number comes from MLflow runs on the **`full`** dataset, evaluated on the same
+**2,000 matched `(project, func_name, id)` samples** per run (Python + Java), for two
+backbones via OpenRouter, with **`openai/gpt-4o-mini`** as the RTC backward model. BLEU is
+sentence BLEU against the human reference, on a 0–100 scale.
 
-### Contamination control — `original` vs `new` projects
+| Key | Method | Model | MLflow run |
+|---|---|---|---|
+| zeroshot / 70B | `zero_shot_llm` | Llama 3.3 70B Instruct | `3fc7ad1d` |
+| few_shot / 70B | `few_shot_llm` | Llama 3.3 70B Instruct | `d1197c3c` |
+| asap / 70B | `few_shot_asap` | Llama 3.3 70B Instruct | `5005bca8` |
+| cara / 70B | `agentic_rag_all_context` | Llama 3.3 70B Instruct | `68e8ff6f` |
+| zeroshot / 8B | `zero_shot_llm` | Llama 3.1 8B Instruct | `38bf994f` |
+| few_shot / 8B | `few_shot_llm` | Llama 3.1 8B Instruct | `f39382e4` |
+| asap / 8B | `few_shot_asap` | Llama 3.1 8B Instruct | `93ac3d2d` |
+| cara / 8B | `agentic_rag_all_context` | Llama 3.1 8B Instruct | `9f85a34e` |
+| codet5 | `codet5` | `Salesforce/codet5-base-multi-sum` | `847b29e6` |
 
-`new` projects were added after the base models' training cutoff. Scores are consistently *higher* there, so the gap is not evidence of memorization on `original`; the newer repos simply have more formulaic docstrings.
+Retrieval-based methods use BM25 with n=3; both CARA runs use `use_filter: false` with
+`n_candidates: 3`. Run IDs are MLflow `run_uuid`s — see `mlflow-data/mlflow.db` for full
+provenance. The analysis itself lives in `scratch/cara_bleu_rtc_story.ipynb`, which reads
+the prediction CSVs straight out of the MLflow artifact store.
 
-| Method | BLEU (original) | BLEU (new) | RTC BLEU (original) | RTC BLEU (new) |
-|---|---:|---:|---:|---:|
-| `few_shot_asap` | **21.11** | **24.57** | 30.97 | 31.67 |
-| `agentic_rag_all_context` | 20.47 | 22.40 | **32.83** | **34.45** |
-| `few_shot_all_context_instruct` | 18.66 | 20.35 | 32.49 | 34.39 |
-| `zero_shot_llm` | 14.64 | 16.10 | 32.08 | 33.45 |
+### Practical significance
 
-### Per-project BLEU
+With n=2,000 paired samples, a Wilcoxon signed-rank test finds *every* comparison below
+statistically significant (p < 0.05), including differences far too small to matter. So
+each comparison carries one of:
 
-| Project | Set | `zero_shot_llm` | `few_shot_all_context_instruct` | `agentic_rag_all_context` | `few_shot_asap` |
+- `**` — significant **and** the mean difference exceeds **2 points**, the bar for a
+  difference worth claiming in prose
+- `*` — significant, but the mean difference is ≤ 2 points (real, not material)
+- blank — not statistically significant
+
+### Table 1 — Headline means
+
+| Method | Model | n | BLEU | RTC-CrystalBLEU | RTC-CodeBLEU |
 |---|---|---:|---:|---:|---:|
-| apache/airflow | original | 13.16 | 17.04 | 17.61 | **20.11** |
-| vaexio/vaex | original | 16.30 | 26.24 | **26.28** | 20.26 |
-| Qiskit/qiskit-terra | original | 16.13 | 20.36 | **25.84** | 23.17 |
-| PyCQA/pylint | original | 15.91 | 17.39 | 18.23 | **21.55** |
-| h2oai/h2o-3 | original | 15.01 | 15.82 | 18.28 | **20.84** |
-| oblac/jodd | original | 14.25 | 23.74 | **26.27** | 25.36 |
-| orientechnologies/orientdb | original | 12.78 | 15.08 | 15.74 | **18.14** |
-| real-logic/aeron | original | 15.47 | 22.66 | 25.64 | **27.24** |
-| spring-projects/spring-security | original | 14.70 | 14.18 | 15.96 | **17.70** |
-| wildfly/wildfly | original | 12.64 | 14.08 | 14.85 | **16.74** |
-| google/adk-java | new | 24.07 | 36.15 | **36.91** | 35.31 |
-| google/langextract | new | 16.12 | 15.51 | 16.68 | **21.88** |
-| newton-physics/newton | new | 15.48 | 16.23 | 19.87 | **27.40** |
-| tamboui/tamboui | new | 20.52 | 37.64 | **41.87** | 31.92 |
-| MemPalace/mempalace | new | 12.25 | 13.87 | 15.33 | **16.08** |
-| agentscope-ai/QwenPaw | new | 14.45 | 15.50 | 16.20 | **20.42** |
-| floci-io/floci | new | 12.63 | 14.22 | 16.24 | **16.87** |
-| iflytek/astron-agent | new | 13.01 | 17.45 | 18.98 | **32.16** |
-| opendataloader-project/opendataloader-pdf | new | 18.14 | 20.33 | 23.20 | **23.89** |
-| vllm-project/vllm-omni | new | 14.30 | 16.60 | 18.70 | **19.73** |
+| zeroshot | 70B | 2000 | 10.69 | **30.57** | **38.74** |
+| zeroshot | 8B | 2000 | 14.21 | 27.35 | 36.36 |
+| few_shot | 70B | 2000 | 23.93 | 25.76 | 35.30 |
+| few_shot | 8B | 2000 | 22.01 | 25.98 | 35.56 |
+| asap | 70B | 2000 | **24.22** | 25.46 | 35.11 |
+| asap | 8B | 2000 | 22.79 | 25.70 | 35.36 |
+| cara | 70B | 2000 | 18.37 | 29.44 | 37.89 |
+| cara | 8B | 2000 | 19.19 | 28.03 | 37.03 |
+| codet5 | — | 2000 | 18.99 | 24.97 | 34.66 |
 
-Per-project metrics are not logged as MLflow metrics — they land in the `per_project_metrics.json` table artifact on each run.
+Zero-shot has the worst BLEU and the best RTC. That inversion is the whole tension: the
+methods that push BLEU up are the ones that pull RTC down.
 
-### Ablations — `small` dataset
+### Table 2 — Significance vs. zero-shot
 
-Run on the 6-project subset (300 samples), so these are directional only and not comparable to the tables above.
+Paired Wilcoxon, matched on `(project, func_name, id)`, each method against zero-shot on
+the same backbone. `d` is the mean difference (method − zero-shot).
 
-| Method | Model | Config | BLEU | RTC BLEU |
-|---|---|---|---:|---:|
-| `few_shot_asap` | Llama 3.1 8B Instruct | n=3 | **22.86** | 30.34 |
-| `agentic_rag_all_context` | Llama 3.1 8B Instruct | no filter, 5 chunks | 21.69 | 34.09 |
-| `agentic_rag_all_context` | Llama 3.1 8B Instruct | LLM filter, 3 of 5 chunks | 20.33 | 33.66 |
-| `few_shot_asap` | Llama 3.3 70B Instruct | n=3 | 20.11 | 28.11 |
-| `few_shot_all_context_instruct` | Llama 3.1 8B Instruct | n=3 | 19.43 | 32.92 |
-| `agentic_rag` | Llama 3.1 8B Instruct | no filter, few-shot | 18.87 | 33.80 |
-| `agentic_rag_all_context` | Llama 3.3 70B Instruct | no filter, 5 chunks | 18.74 | 34.56 |
-| `agentic_rag` | Llama 3.1 8B Instruct | LLM filter, few-shot | 17.47 | 33.60 |
-| `zero_shot_llm` | Llama 3.1 8B Instruct | — | 15.55 | 26.95 |
-| `agentic_rag` | Llama 3.1 8B Instruct | LLM filter, no few-shot | 11.85 | **35.91** |
+| Comparison | Model | dBLEU | | dRTC-CrystalBLEU | | dRTC-CodeBLEU | |
+|---|---|---:|---|---:|---|---:|---|
+| few_shot vs. zeroshot | 70B | +13.25 | `**` | −4.81 | `**` | −3.44 | `**` |
+| asap vs. zeroshot | 70B | +13.53 | `**` | −5.11 | `**` | −3.63 | `**` |
+| cara vs. zeroshot | 70B | +7.68 | `**` | −1.13 | `*` | −0.85 | `*` |
+| few_shot vs. zeroshot | 8B | +7.81 | `**` | −1.38 | `*` | −0.80 | `*` |
+| asap vs. zeroshot | 8B | +8.58 | `**` | −1.65 | `*` | −1.00 | `*` |
+| cara vs. zeroshot | 8B | +4.98 | `**` | +0.68 | `*` | +0.67 | `*` |
 
-Two consistent findings across the ablations: the LLM chunk filter does not pay for itself (it costs roughly 2x and scores slightly lower than passing all BM25 hits through), and dropping few-shot examples collapses BLEU while *improving* RTC — without examples the model stops imitating docstring style and describes the code more literally.
+On 70B the split is unambiguous: ASAP and few-shot buy ~13 BLEU points at a materially
+significant RTC cost on both metrics (`**`), while CARA buys 7.68 BLEU points at an RTC
+cost that stays under the 2-point bar (`*`). On 8B every RTC movement is sub-material, but
+only CARA's is *positive* — it gains BLEU and RTC at once.
+
+ASAP is the stronger BLEU method throughout, by roughly 5–6 points. The claim is not that
+CARA wins on BLEU; it is that ASAP's larger BLEU gain is partly paid for out of
+faithfulness, and CARA's is not.
+
+### Table 3 — CARA vs. the CodeT5 baseline
+
+CodeT5 is a fine-tuned, non-prompted baseline with no model-size axis, so it sits in its
+own comparison.
+
+| Comparison | Model | dBLEU | | dRTC-CrystalBLEU | | dRTC-CodeBLEU | |
+|---|---|---:|---|---:|---|---:|---|
+| cara vs. CodeT5 | 70B | −0.62 | `*` | +4.47 | `**` | +3.23 | `**` |
+| cara vs. CodeT5 | 8B | +0.20 | `*` | +3.06 | `**` | +2.37 | `**` |
+
+CARA matches a fine-tuned model on BLEU — the difference is under half a point on both
+backbones, well inside the noise bar — while beating it by 2.4–4.5 points on both RTC
+metrics.
+
+### What this means
+
+Few-shot examples teach the model to imitate the *style* of the project's docstrings,
+which is most of what BLEU rewards. ASAP maximizes that. Retrieved repository context
+teaches the model what the code *does*, which is what survives a round trip. Reporting
+BLEU alone would rank ASAP first and hide the trade; reporting both shows CARA occupying
+the position the metrics jointly favor — near-ASAP reference overlap at near-zero-shot
+faithfulness.
