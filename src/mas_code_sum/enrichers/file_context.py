@@ -1,16 +1,17 @@
-"""Extract file-level context (module docstring, enclosing class, imports) for Python files.
+"""Extract file-level context (module docstring, enclosing class, imports) from source files.
 
 Given a dataset row's repo and path, loads the source file from `dataset/repos/`
 and pulls signals that help the LLM summarize a target function.
 
-Language-specific signals
--------------------------
-Python:
+This module holds the shared pieces — source loading, the FileContext record,
+rendering, and language dispatch. Both backends parse with tree-sitter:
+
+Python (file_context_python.py):
   - module_doc: top-of-file docstring (stripped)
   - class_name / class_doc: enclosing class name and docstring (if method)
   - imports: top-level import statements
 
-Java (delegated to file_context_java.py):
+Java (file_context_java.py):
   - class_name / class_doc: enclosing class name and Javadoc
   - imports: top-level import statements
   - module_doc is always None (Java has no file-level docstring)
@@ -20,15 +21,10 @@ There is intentionally no forced common mapping between languages.
 
 from __future__ import annotations
 
-import ast
-import re
 import subprocess
-import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-
-_DEF_RE = re.compile(r"\b(?:async\s+)?def\s+([A-Za-z_][A-Za-z_0-9]*)\s*\(")
 
 REPOS_ROOT = Path(__file__).parents[3] / "dataset" / "repos"
 
@@ -93,101 +89,35 @@ def _path_at_sha(repo: str, current_path: str, sha: str) -> str:
 
 
 @lru_cache(maxsize=512)
-def _load_source(repo: str, path: str, sha: str | None = None) -> str | None:
+def _load_bytes(repo: str, path: str, sha: str | None = None) -> bytes | None:
+    """Read the file, pinned to `sha` when given. tree-sitter parses bytes."""
     if sha is not None:
-        repo_dir = str(_repo_dir(repo))
         resolved = _path_at_sha(repo, path, sha)
         result = subprocess.run(
             ["git", "show", f"{sha}:{resolved}"],
-            cwd=repo_dir, capture_output=True,
+            cwd=str(_repo_dir(repo)),
+            capture_output=True,
         )
         if result.returncode != 0:
             return None
-        return result.stdout.decode("utf-8", errors="replace")
-    file_path = _repo_dir(repo) / path
-    return file_path.read_text(encoding="utf-8", errors="replace")
+        return result.stdout
+    return (_repo_dir(repo) / path).read_bytes()
 
 
-@lru_cache(maxsize=512)
-def _parse(repo: str, path: str, sha: str | None = None) -> tuple[ast.Module, str] | None:
-    """Parse the source file. Returns None (with one-time warning) for Py2/unparseable files.
-
-    Dataset contains legacy Python 2 source (e.g., `print "..."`), which Py3's ast
-    rejects. This is an external-data boundary — we surface the issue with a warning
-    rather than crashing the run.
-    """
-    src = _load_source(repo, path, sha)
-    if src is None:
-        return None
-    try:
-        return ast.parse(src), src
-    except SyntaxError as e:
-        warnings.warn(
-            f"file_context: cannot parse {repo}/{path} (line {e.lineno}: {e.msg}); "
-            f"falling back to repo-level context for this file.",
-            stacklevel=3,
-        )
-        return None
+def _load_source(repo: str, path: str, sha: str | None = None) -> str | None:
+    """Text form of `_load_bytes`, for callers that want str (e.g. rtc.py)."""
+    raw = _load_bytes(repo, path, sha)
+    return None if raw is None else raw.decode("utf-8", errors="replace")
 
 
 def _extract_func_name_from_code(code: str) -> str | None:
-    """Find the first `def NAME` in a code snippet.
+    """Find the first `def NAME` in a Python code snippet.
 
-    Tries AST first; falls back to regex because dataset code is often the
-    single-line tokenized form (no indentation), which ast.parse rejects.
+    Re-exported from the Python backend; kept here because callers import it
+    from this module.
     """
-    try:
-        tree = ast.parse(code)
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                return node.name
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                return node.name
-    except SyntaxError:
-        pass
-    m = _DEF_RE.search(code)
-    return m.group(1) if m else None
-
-
-def _find_enclosing_class(tree: ast.Module, target_name: str, qualifier: str | None = None) -> ast.ClassDef | None:
-    """Return the ClassDef directly containing a function named target_name, or None.
-
-    Several classes in one file can define the same method name, so when
-    qualifier is given prefer the class whose name matches it; otherwise fall
-    back to the first match in walk order."""
-    candidates: list[ast.ClassDef] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == target_name:
-                    candidates.append(node)
-                    break
-    if not candidates:
-        return None
-    if qualifier:
-        for cls in candidates:
-            if cls.name == qualifier:
-                return cls
-    return candidates[0]
-
-
-def _collect_imports(tree: ast.Module, src: str, max_imports: int) -> list[str]:
-    """Return source text of top-level import statements (capped by max_imports; 0 = none)."""
-    if max_imports <= 0:
-        return []
-    lines = src.splitlines()
-    out: list[str] = []
-    for node in tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            # ast lineno is 1-based, end_lineno present in py3.8+
-            start = node.lineno - 1
-            end = (node.end_lineno or node.lineno)
-            stmt = "\n".join(lines[start:end])
-            out.append(stmt)
-            if len(out) >= max_imports:
-                break
-    return out
+    from .file_context_python import _extract_func_name_from_code as _impl
+    return _impl(code)
 
 
 def extract_file_context(
@@ -206,46 +136,18 @@ def extract_file_context(
     `max_imports` caps how many import statements are collected (0 disables).
     `language` selects the extractor backend ('python' or 'java').
     """
+    # Lazy imports so a single-language run only pays for one grammar.
+    if language == "python":
+        from .file_context_python import extract_python_file_context
+        return extract_python_file_context(
+            repo, path, func_name=func_name, code=code, max_imports=max_imports, sha=sha
+        )
     if language == "java":
-        # Lazy import so python-only runs don't pay tree-sitter startup.
         from .file_context_java import extract_java_file_context
         return extract_java_file_context(
             repo, path, func_name=func_name, code=code, max_imports=max_imports, sha=sha
         )
-    if language != "python":
-        raise ValueError(f"Unsupported language for file context: {language!r}")
-
-    parsed = _parse(repo, path, sha)
-    if parsed is None:
-        return FileContext(language="python", module_doc=None, class_name=None, class_doc=None, imports=[])
-    tree, src = parsed
-
-    module_doc = ast.get_docstring(tree)
-
-    # Normalize func name: accept 'Class.method' or bare 'method'.
-    if func_name is None and code is not None:
-        func_name = _extract_func_name_from_code(code)
-
-    class_name: str | None = None
-    class_doc: str | None = None
-    if func_name:
-        parts = func_name.split(".")
-        bare = parts[-1]
-        qualifier = parts[-2] if len(parts) > 1 else None
-        cls = _find_enclosing_class(tree, bare, qualifier)
-        if cls is not None:
-            class_name = cls.name
-            class_doc = ast.get_docstring(cls)
-
-    imports = _collect_imports(tree, src, max_imports=max_imports)
-
-    return FileContext(
-        language="python",
-        module_doc=module_doc.strip() if module_doc else None,
-        class_name=class_name,
-        class_doc=class_doc.strip() if class_doc else None,
-        imports=imports,
-    )
+    raise ValueError(f"Unsupported language for file context: {language!r}")
 
 
 def render_file_context(
@@ -287,69 +189,25 @@ def render_file_context(
     return "\n".join(parts)
 
 
-def _build_outline_python(tree: ast.Module, src: str, exclude_name: str | None) -> list[str]:
-    """Walk AST and collect signature + first-line docstring for each function/class.
-
-    Skips any node whose name matches exclude_name (bare, without ClassName. prefix).
-    Returns a list of formatted blocks.
-    """
-    lines = src.splitlines()
-    blocks: list[str] = []
-
-    def _first_doc_line(node: ast.AST) -> str | None:
-        doc = ast.get_docstring(node)
-        if not doc:
-            return None
-        return doc.split("\n")[0].strip()
-
-    def _sig_line(node: ast.AST) -> str:
-        return lines[node.lineno - 1].rstrip()  # type: ignore[attr-defined]
-
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name == exclude_name:
-                continue
-            sig = _sig_line(node)
-            doc = _first_doc_line(node)
-            blocks.append(f"{sig}\n    \"{doc}\"" if doc else sig)
-        elif isinstance(node, ast.ClassDef):
-            if node.name == exclude_name:
-                continue
-            class_sig = _sig_line(node)
-            class_doc = _first_doc_line(node)
-            class_block = f"{class_sig}\n    \"{class_doc}\"" if class_doc else class_sig
-            method_blocks: list[str] = []
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if item.name == exclude_name:
-                        continue
-                    sig = "    " + _sig_line(item).lstrip()
-                    doc = _first_doc_line(item)
-                    method_blocks.append(f"{sig}\n        \"{doc}\"" if doc else sig)
-            if method_blocks:
-                blocks.append(class_block + "\n\n" + "\n\n".join(method_blocks))
-            else:
-                blocks.append(class_block)
-
-    return blocks
-
-
 def extract_file_outline(
     repo: str,
     path: str,
     exclude_func_name: str | None = None,
     language: str = "python",
     max_chars: int = 4000,
-    cutoff_timestamp: str | None = None,
     sha: str | None = None,
 ) -> str:
     """Return a compact outline of the file suitable for prompt inclusion.
 
-    For Python: extracts function/class signatures and their first-line docstrings
-    via AST, skipping the target function. This gives the LLM naming conventions
-    and documentation style without flooding it with implementation details.
+    Temporal safety comes from `sha`: the file is read at the sample's blame
+    commit via `git show`, so the outline cannot contain code written after
+    the target function. (A `cutoff_timestamp` parameter used to sit here but
+    was never read by the body — the sha pin was always doing the work.)
 
-    For Java / other: falls back to truncated raw source.
+    Both languages extract function/class signatures and their first-line
+    docs from the tree-sitter parse, skipping the target function. This gives
+    the LLM naming conventions and documentation style without flooding it
+    with implementation details, and never emits raw source.
 
     `exclude_func_name` may be a bare name or 'ClassName.method' — only the bare
     name is used for matching, so either form works.
@@ -359,29 +217,24 @@ def extract_file_outline(
         bare_exclude = exclude_func_name.split(".")[-1]
 
     if language == "python":
-        parsed = _parse(repo, path, sha)
-        if parsed is not None:
-            tree, src = parsed
-            blocks = _build_outline_python(tree, src, bare_exclude)
-            outline = "\n\n".join(blocks)
-            if len(outline) > max_chars:
-                outline = outline[:max_chars].rstrip() + "\n... [truncated]"
-            return outline
-        # Parse failed (e.g. Python 2 syntax) — return nothing rather than
-        # risk leaking the target function's docstring via raw source.
-        return ""
-
-    if language == "java":
+        from .file_context_python import _build_outline_python, _parse as _py_parse
+        parsed = _py_parse(repo, path, sha)
+        if parsed is None:
+            return ""
+        root, src = parsed
+        blocks = _build_outline_python(root, src, bare_exclude)
+    elif language == "java":
         from .file_context_java import _build_outline_java, _parse as _java_parse
         parsed = _java_parse(repo, path, sha)
         if parsed is None:
             return ""
         root, src = parsed
         blocks = _build_outline_java(root, src, bare_exclude)
-        outline = "\n\n".join(blocks)
-        if len(outline) > max_chars:
-            outline = outline[:max_chars].rstrip() + "\n... [truncated]"
-        return outline
+    else:
+        # Unsupported language — return nothing rather than risk leaking docstrings.
+        return ""
 
-    # Unsupported language — return nothing rather than risk leaking docstrings.
-    return ""
+    outline = "\n\n".join(blocks)
+    if len(outline) > max_chars:
+        outline = outline[:max_chars].rstrip() + "\n... [truncated]"
+    return outline
