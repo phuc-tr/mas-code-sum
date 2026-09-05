@@ -60,32 +60,14 @@ This project uses [uv](https://github.com/astral-sh/uv) for dependency managemen
 uv sync
 ```
 
-LLM methods support three backends. Set the relevant API key(s):
+LLM methods support two backends. Set the relevant API key(s):
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...   # OpenRouter
 export FEATHERLESS_API_KEY=...         # Featherless (default for completions-based methods)
-export RUNPOD_API=...                  # RunPod serverless (self-hosted models)
-export RUNPOD_ENDPOINT_ID=...          # the endpoint id from the RunPod console
 ```
 
-Pick one per run with `--backend {openrouter,featherless,runpod}` (or `method_params.backend` in the YAML).
-
-`runpod` targets a serverless endpoint running an OpenAI-compatible worker (e.g. the vLLM worker), at
-`https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/openai/v1`. `--model` must be the model name the worker was
-deployed with, not an OpenRouter-style slug. Optional knobs:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `RUNPOD_BASE_URL` | derived from endpoint id | Full base URL override (e.g. a dedicated pod) |
-| `RUNPOD_MAX_CONCURRENCY` | 4 | In-flight requests; match your endpoint's max workers |
-| `RUNPOD_TIMEOUT` | 600 | Per-request seconds — generous because a scaled-to-zero endpoint cold-starts |
-
-Smoke-test the endpoint before launching a full run:
-
-```bash
-uv run python scripts/test_runpod.py
-```
+Pick one per run with `--backend {openrouter,featherless}` (or `method_params.backend` in the YAML).
 
 Methods that read a sample's surrounding source file (`few_shot_file_context`, `few_shot_all_context`, the `agentic_rag` family) and the RTC metric need the dataset repos checked out locally at their recorded shas:
 
