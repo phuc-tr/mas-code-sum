@@ -106,7 +106,7 @@ def run_experiment(
             langs = [s["language"] for s in samples]
             paths = [s.get("path") for s in samples]
             urls = [s.get("url") for s in samples]
-            blame_timestamps = [s.get("latest_blame_timestamp") for s in samples]
+            blame_timestamps = [s.get("authored_timestamp") for s in samples]
             blame_shas = [s.get("blame_sha") for s in samples]
             # Dataset-qualified 'Class.method' — disambiguates same-named methods
             # across nested/sibling classes when resolving the enclosing class.

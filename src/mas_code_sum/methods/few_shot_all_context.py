@@ -131,7 +131,7 @@ class FewShotAllContextSummarizer(BaseSummarizer):
                 exclude_func_name=exclude,
                 language=language,
                 max_chars=self.max_file_chars,
-                cutoff_timestamp=blame_timestamp,
+                sha=blame_sha,
             )
             if outline:
                 parts.append(f"Other functions in file:\n{outline}")

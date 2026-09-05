@@ -29,13 +29,14 @@ Prompt structure:
   {code}
   Output only the one-sentence summary ...
 
-Leakage control: candidate chunks are dropped by content, not by file — any
-chunk containing the target function's own code is excluded (so other chunks
-from the same file remain eligible), and — since repos contain duplicated
-functions and files move between the dataset snapshot and HEAD — any chunk
-containing the reference docstring itself is dropped too (the runner supplies
-`ground_truths`; they are used only for this exclusion and never shown to
-either agent).
+Leakage control: candidate chunks are dropped by file — every chunk from the
+target function's own file is excluded, since that file is already supplied
+in full as local file context (retrieval is meant to surface other files).
+On top of that, `temporal_filter=True` (default) restricts retrieval to code
+authored no later than the target function itself, so chunks written after it
+cannot be retrieved. The index is shared per repo (bounded by the repo's
+latest test sample) and narrowed to each sample's own `authored_timestamp` at
+query time; `cutoff_policy` selects how strictly a chunk is dated.
 
 Thinking models: `<think>...</think>` blocks are stripped from both agents'
 outputs before parsing, and the gatherer's token budget is sized so the answer
@@ -46,6 +47,7 @@ import re
 
 from ..data import get_metadata_index
 from ..enrichers.ast_chunks import Chunk, get_chunk_index
+from ..enrichers.blame_cutoff import parse_timestamp
 from ..retrievers.base import BaseRetriever
 from .base import BaseSummarizer, make_clients, strip_code_fences
 
@@ -117,6 +119,8 @@ class AgenticRagSummarizer(BaseSummarizer):
         n_candidates: int = 10,
         n_context: int = 4,
         max_chunk_size: int = 1200,
+        temporal_filter: bool = True,
+        cutoff_policy: str = "start",
         max_chunk_chars: int = 1500,
         gatherer_max_tokens: int = 2048,
         summarizer_max_tokens: int = 2048,
@@ -131,6 +135,8 @@ class AgenticRagSummarizer(BaseSummarizer):
         self.n_candidates = n_candidates  # BM25 pre-ranked chunks shown to the gatherer
         self.n_context = n_context  # max chunks the gatherer may keep
         self.max_chunk_size = max_chunk_size  # astchunk max non-whitespace chars per chunk
+        self.temporal_filter = temporal_filter  # drop chunks authored after the repo's test cutoff
+        self.cutoff_policy = cutoff_policy  # date a chunk by "start" line or "last_touched" line
         self.max_chunk_chars = max_chunk_chars  # truncation cap when rendering a chunk
         # Token budgets are roomy because thinking models reason before answering.
         self.gatherer_max_tokens = gatherer_max_tokens
@@ -162,10 +168,21 @@ class AgenticRagSummarizer(BaseSummarizer):
         return picked
 
     async def _gather_context(
-        self, code: str, language: str, project: str, ground_truth: str | None = None
+        self, code: str, language: str, project: str,
+        blame_timestamp: str | None = None, path: str | None = None,
     ) -> list[Chunk]:
-        index = get_chunk_index(project, language, max_chunk_size=self.max_chunk_size)
-        candidates = index.query(code, k=self.n_candidates, exclude_text=ground_truth)
+        index = get_chunk_index(
+            project,
+            language,
+            max_chunk_size=self.max_chunk_size,
+            temporal_filter=self.temporal_filter,
+            cutoff_policy=self.cutoff_policy,
+        )
+        # The index is shared by the repo; narrow it to this sample's own date.
+        cutoff = parse_timestamp(blame_timestamp) if self.temporal_filter else None
+        candidates = index.query(
+            code, k=self.n_candidates, cutoff=cutoff, exclude_path=path,
+        )
         if not candidates:
             return []
 
@@ -245,11 +262,13 @@ class AgenticRagSummarizer(BaseSummarizer):
         project: str | None = None,
         path: str | None = None,
         url: str | None = None,
-        ground_truth: str | None = None,
+        blame_timestamp: str | None = None,
     ) -> str:
         chunks: list[Chunk] = []
         if project:
-            chunks = await self._gather_context(code, language, project, ground_truth=ground_truth)
+            chunks = await self._gather_context(
+                code, language, project, blame_timestamp=blame_timestamp, path=path,
+            )
 
         prompt = self.build_prompt(code, language, project, path, chunks)
         response = await self._async_client.chat.completions.create(
@@ -267,7 +286,7 @@ class AgenticRagSummarizer(BaseSummarizer):
         projects: list[str | None] | None = None,
         paths: list[str | None] | None = None,
         urls: list[str | None] | None = None,
-        ground_truths: list[str | None] | None = None,
+        blame_timestamps: list[str | None] | None = None,
     ) -> list[str]:
         import asyncio
         from tqdm.asyncio import tqdm as atqdm
@@ -281,22 +300,25 @@ class AgenticRagSummarizer(BaseSummarizer):
             paths = [None] * n
         if urls is None:
             urls = [None] * n
-        if ground_truths is None:
-            ground_truths = [None] * n
+        if blame_timestamps is None:
+            blame_timestamps = [None] * n
 
         async def _gather():
             sem = asyncio.Semaphore(self.max_concurrency)
 
-            async def _one(code, lang, proj, path, url, gt):
+            async def _one(code, lang, proj, path, url, blame_ts):
                 async with sem:
                     return await _call_with_rate_limit_retry(
-                        lambda: self.async_summarize(code, lang, project=proj, path=path, url=url, ground_truth=gt)
+                        lambda: self.async_summarize(
+                            code, lang, project=proj, path=path, url=url,
+                            blame_timestamp=blame_ts,
+                        )
                     )
 
             return await atqdm.gather(*[
-                _one(code, lang, proj, path, url, gt)
-                for code, lang, proj, path, url, gt
-                in zip(codes, languages, projects, paths, urls, ground_truths)
+                _one(code, lang, proj, path, url, blame_ts)
+                for code, lang, proj, path, url, blame_ts
+                in zip(codes, languages, projects, paths, urls, blame_timestamps)
             ], desc="samples")
 
         return list(asyncio.run(_gather()))

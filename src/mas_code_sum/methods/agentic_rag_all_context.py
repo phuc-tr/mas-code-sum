@@ -81,7 +81,6 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
             exclude_func_name=exclude,
             language=language,
             max_chars=self.max_file_chars,
-            cutoff_timestamp=blame_timestamp,
             sha=blame_sha,
         )
         if outline:
@@ -142,14 +141,15 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
         project: str | None = None,
         path: str | None = None,
         url: str | None = None,
-        ground_truth: str | None = None,
         blame_timestamp: str | None = None,
         blame_sha: str | None = None,
         func_name: str | None = None,
     ) -> str:
         chunks: list[Chunk] = []
         if project:
-            chunks = await self._gather_context(code, language, project, ground_truth=ground_truth)
+            chunks = await self._gather_context(
+                code, language, project, blame_timestamp=blame_timestamp, path=path,
+            )
 
         prompt = self.build_prompt(code, language, project, path, chunks, blame_timestamp, blame_sha, func_name)
         response = await self._async_client.chat.completions.create(
@@ -167,7 +167,6 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
         projects: list[str | None] | None = None,
         paths: list[str | None] | None = None,
         urls: list[str | None] | None = None,
-        ground_truths: list[str | None] | None = None,
         blame_timestamps: list[str | None] | None = None,
         blame_shas: list[str | None] | None = None,
         func_names: list[str | None] | None = None,
@@ -182,8 +181,6 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
             paths = [None] * n
         if urls is None:
             urls = [None] * n
-        if ground_truths is None:
-            ground_truths = [None] * n
         if blame_timestamps is None:
             blame_timestamps = [None] * n
         if blame_shas is None:
@@ -194,19 +191,19 @@ class AgenticRagAllContextSummarizer(AgenticRagSummarizer):
         async def _gather():
             sem = asyncio.Semaphore(self.max_concurrency)
 
-            async def _one(code, lang, proj, path, url, gt, blame_ts, blame_sha, func_name):
+            async def _one(code, lang, proj, path, url, blame_ts, blame_sha, func_name):
                 async with sem:
                     return await _call_with_rate_limit_retry(
                         lambda: self.async_summarize(
-                            code, lang, project=proj, path=path, url=url, ground_truth=gt,
+                            code, lang, project=proj, path=path, url=url,
                             blame_timestamp=blame_ts, blame_sha=blame_sha, func_name=func_name,
                         )
                     )
 
             return await atqdm.gather(*[
-                _one(code, lang, proj, path, url, gt, blame_ts, blame_sha, func_name)
-                for code, lang, proj, path, url, gt, blame_ts, blame_sha, func_name
-                in zip(codes, languages, projects, paths, urls, ground_truths, blame_timestamps, blame_shas, func_names)
+                _one(code, lang, proj, path, url, blame_ts, blame_sha, func_name)
+                for code, lang, proj, path, url, blame_ts, blame_sha, func_name
+                in zip(codes, languages, projects, paths, urls, blame_timestamps, blame_shas, func_names)
             ], desc="samples")
 
         return list(asyncio.run(_gather()))

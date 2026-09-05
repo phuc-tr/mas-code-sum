@@ -3,9 +3,11 @@ method: agentic_rag_all_context
 method_params:
   use_repo: true
   use_filter: false
-  n_candidates: 5
+  n_candidates: 3
   # n_context: 3
   max_chunk_size: 1200
+  temporal_filter: true       # drop chunks authored after the repo's earliest test sample
+  cutoff_policy: start        # date a chunk by its first line; "last_touched" is the strict variant
   # gatherer_model: openai/gpt-4o-mini  # defaults to `model` when unset
   use_outer_context: true
   use_class_context: true
