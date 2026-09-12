@@ -123,7 +123,10 @@ class AgenticRagSummarizer(BaseSummarizer):
         cutoff_policy: str = "start",
         max_chunk_chars: int = 1500,
         gatherer_max_tokens: int = 2048,
-        summarizer_max_tokens: int = 2048,
+        # 128 matches every other summarizing method's cap, so token usage is
+        # comparable across methods. The gatherer keeps its larger budget: it
+        # emits selected context chunks, not a one-sentence summary.
+        summarizer_max_tokens: int = 128,
     ):
         self.model = model
         self.retriever = retriever

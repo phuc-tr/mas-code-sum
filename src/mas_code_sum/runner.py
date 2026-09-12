@@ -206,6 +206,20 @@ def run_experiment(
         _log_predictions_artifact(artifact_rows)
         mlflow.log_metric("cost_usd", cost_tracker.total)
 
+        # Token usage across every API call the run made, the RTC backward model
+        # included -- `cost_usd` covers the same calls, so the two agree on scope.
+        # Per-sample figures divide by the samples actually summarised, so they
+        # stay comparable across runs of different size.
+        tokens = cost_tracker.tokens
+        mlflow.log_metrics(tokens)
+        if all_samples:
+            mlflow.log_metrics(
+                {
+                    "input_tokens_per_sample": tokens["input_tokens"] / len(all_samples),
+                    "output_tokens_per_sample": tokens["output_tokens"] / len(all_samples),
+                }
+            )
+
 
 _RTC_METRIC_KEYS = [
     "rtc_bleu", "rtc_crystalbleu", "rtc_codebleu", "codebleu_ngram_match",

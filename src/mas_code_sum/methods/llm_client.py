@@ -53,30 +53,55 @@ async def _call_with_rate_limit_retry(coro_factory):
 
 
 class CostTracker:
-    """Accumulates actual USD spend reported by OpenRouter's usage accounting.
+    """Accumulates actual USD spend and token usage reported by OpenRouter.
 
     OpenRouter returns the exact, post-discount dollar cost of each generation
     in `response.usage.cost` when the request opts in via `extra_body={"usage":
     {"include": True}}`. Token-count-based estimates can't reproduce
     per-model/provider pricing (and promos), so this is the only accurate source.
+
+    The same `usage` object carries `prompt_tokens`/`completion_tokens`, tracked
+    here too: MLflow's autolog only attaches token counts to chat-completion
+    spans, so prompt-completion methods (ASAP, few-shot) would otherwise have no
+    token record at all. Counts cover every call a run makes, including the RTC
+    backward model -- the split by model lives in the traces, not here.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._total = 0.0
+        self._input_tokens = 0
+        self._output_tokens = 0
+        self._calls = 0
 
-    def add(self, amount: float) -> None:
+    def add(self, amount: float, input_tokens: int = 0, output_tokens: int = 0) -> None:
         with self._lock:
             self._total += amount
+            self._input_tokens += input_tokens
+            self._output_tokens += output_tokens
+            self._calls += 1
 
     def reset(self) -> None:
         with self._lock:
             self._total = 0.0
+            self._input_tokens = 0
+            self._output_tokens = 0
+            self._calls = 0
 
     @property
     def total(self) -> float:
         with self._lock:
             return self._total
+
+    @property
+    def tokens(self) -> dict[str, int]:
+        """Totals across every recorded call: input, output and call count."""
+        with self._lock:
+            return {
+                "input_tokens": self._input_tokens,
+                "output_tokens": self._output_tokens,
+                "llm_calls": self._calls,
+            }
 
 
 cost_tracker = CostTracker()
@@ -84,9 +109,14 @@ cost_tracker = CostTracker()
 
 def _record_cost(response):
     usage = getattr(response, "usage", None)
-    cost = getattr(usage, "cost", None) if usage is not None else None
-    if cost is not None:
-        cost_tracker.add(cost)
+    if usage is None:
+        return response
+    cost = getattr(usage, "cost", None)
+    cost_tracker.add(
+        cost or 0.0,
+        getattr(usage, "prompt_tokens", None) or 0,
+        getattr(usage, "completion_tokens", None) or 0,
+    )
     return response
 
 

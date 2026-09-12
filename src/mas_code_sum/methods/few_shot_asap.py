@@ -184,8 +184,17 @@ class FewShotAsapSummarizer(BaseSummarizer):
         response = await self._async_client.completions.create(
             model=self.model,
             prompt=prompt,
-            max_tokens=50,
+            max_tokens=128,
             temperature=0.0,
+            # Stop at the closing tag so generation ends where `parse_reply`
+            # cuts. Without it the model runs to `max_tokens` -- continuing into
+            # the next few-shot block -- and everything past "</s>" is generated,
+            # billed, and then thrown away.
+            #
+            # Only applied with the stop tag: without one, `parse_reply` keeps
+            # the first line, and stopping at "\n" would return an empty string
+            # whenever the model opens with a newline.
+            **({"stop": ["</s>"]} if self.use_stop_tag else {}),
         )
         return self.parse_reply(response.choices[0].text or "")
 

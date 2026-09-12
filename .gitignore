@@ -8,3 +8,5 @@ mlflow-data/
 .cache/
 dataset/
 notebooks/
+hard-negatives/
+meteor-1.5/
