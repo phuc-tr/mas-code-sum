@@ -29,6 +29,8 @@ dependencies = [
     "seaborn>=0.13.2",
     "pandas>=2.3.3",
     "langdetect>=1.0.9",
+    "sentence-transformers>=5.7.0",
+    "jupyter>=1.1.1",
 ]
 
 [dependency-groups]

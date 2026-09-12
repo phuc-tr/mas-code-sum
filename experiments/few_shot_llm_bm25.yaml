@@ -1,5 +1,9 @@
 method: few_shot_llm
 
+method_params:
+  # null = no <s>...</s> around summaries; set to "<s>" to restore it
+  delimiter: null
+
 retriever: bm25
 retriever_params:
   n: 3
